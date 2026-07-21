@@ -12,6 +12,13 @@ from .upload.tiktok_upload import TikTokUploader
 from .upload.youtube_upload import YouTubeUploader
 
 
+def cmd_gui(args, settings: Settings) -> int:
+    from .gui import launch
+
+    launch()
+    return 0
+
+
 def cmd_doctor(args, settings: Settings) -> int:
     ok = True
 
@@ -122,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("doctor", help="Verify environment setup")
+    sub.add_parser("gui", help="Launch the desktop GUI")
 
     p_youtube = sub.add_parser("youtube", help="Download and crop a YouTube video to shorts spec")
     p_youtube.add_argument("url")
@@ -155,6 +163,7 @@ def main() -> int:
     settings = Settings.load()
 
     handlers = {
+        "gui": cmd_gui,
         "doctor": cmd_doctor,
         "youtube": cmd_youtube,
         "reddit": cmd_reddit,
