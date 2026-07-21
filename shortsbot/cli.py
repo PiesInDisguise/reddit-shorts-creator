@@ -1,5 +1,6 @@
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from config import ConfigError, Settings
@@ -69,7 +70,15 @@ def cmd_doctor(args, settings: Settings) -> int:
 def cmd_youtube(args, settings: Settings) -> int:
     start = video_utils.parse_timestamp(args.start) if args.start else None
     end = video_utils.parse_timestamp(args.end) if args.end else None
-    out_path = Path(args.out) if args.out else None
+
+    if args.out:
+        out_path = Path(args.out)
+    else:
+        # youtube mode exists to prepare background filler footage, so that's
+        # where clips land by default; pass --out to save somewhere else.
+        clips_dir = settings.background_clips_dir
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        out_path = clips_dir / f"clip_{int(time.time())}.mp4"
 
     out = youtube_pipeline.run(
         args.url,
@@ -134,7 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="Verify environment setup")
     sub.add_parser("gui", help="Launch the desktop GUI")
 
-    p_youtube = sub.add_parser("youtube", help="Download and crop a YouTube video to shorts spec")
+    p_youtube = sub.add_parser(
+        "youtube",
+        help="Download and crop a YouTube video into background_clips/ (pass --out to save elsewhere)",
+    )
     p_youtube.add_argument("url")
     p_youtube.add_argument("--mode", choices=["random", "manual"], default="random")
     p_youtube.add_argument("--start")

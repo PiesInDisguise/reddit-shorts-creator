@@ -2,10 +2,13 @@
 
 A personal CLI tool that turns two kinds of source material into vertical (1080x1920) shorts:
 
-- **`youtube`** — download a YouTube video and crop/trim it to shorts spec.
+- **`youtube`** — download a YouTube video, crop/trim it to shorts spec, and save it into
+  `background_clips/`. This mode exists specifically to prepare filler footage (e.g. Minecraft
+  parkour) for `reddit` mode to use — not to produce a final short on its own.
 - **`reddit`** — turn a Reddit thread into a narrated "Reddit story" short: AI voiceover (title,
   then body), a subreddit header card, word-flash captions synced to the narration, and
-  background gameplay-style filler footage.
+  background gameplay-style filler footage (from `background_clips/`, e.g. footage prepared via
+  `youtube` mode above). Saves the finished short to `output/`.
 
 ## Setup
 
@@ -38,7 +41,8 @@ python main.py reddit <url> [--voice-id ID] [--out PATH]
 
 - `youtube --mode random` (default) picks a random 60-second window from the source video.
   `--mode manual --start 10 --end 40` uses an explicit range (clamped to 60s max).
-- Output files land in `output/`.
+- `youtube` saves into `background_clips/` by default; pass `--out PATH` to save elsewhere instead.
+- `reddit` saves the finished short into `output/`.
 
 ### Uploading
 

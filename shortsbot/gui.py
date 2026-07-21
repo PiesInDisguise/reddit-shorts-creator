@@ -1,6 +1,7 @@
 import queue
 import subprocess
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -129,20 +130,24 @@ class YouTubeTab(PipelineTab):
         self.end_entry = ttk.Entry(self, textvariable=self.end_var, state="disabled")
         self.end_entry.grid(row=3, column=1, sticky="ew", padx=6)
 
+        ttk.Label(
+            self, text="Saves into background_clips/ (used as Reddit-mode filler footage)."
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
         button_row = ttk.Frame(self)
-        button_row.grid(row=4, column=0, columnspan=2, pady=10, sticky="w")
+        button_row.grid(row=5, column=0, columnspan=2, pady=10, sticky="w")
         ttk.Button(button_row, text="Run", command=self._run).pack(side="left")
-        ttk.Button(button_row, text="Open output folder", command=self.open_output_folder).pack(
-            side="left", padx=(8, 0)
-        )
+        ttk.Button(
+            button_row, text="Open background clips folder", command=self.open_output_folder
+        ).pack(side="left", padx=(8, 0))
 
         progress_frame = self.build_progress_widgets(self)
-        progress_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        progress_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(4, 8))
 
-        ttk.Label(self, text="Log:").grid(row=6, column=0, sticky="w")
+        ttk.Label(self, text="Log:").grid(row=7, column=0, sticky="w")
         self.log_box = self.build_log_box(self)
-        self.log_box.grid(row=7, column=0, columnspan=2, sticky="nsew")
-        self.rowconfigure(7, weight=1)
+        self.log_box.grid(row=8, column=0, columnspan=2, sticky="nsew")
+        self.rowconfigure(8, weight=1)
 
     def _toggle_manual_fields(self):
         state = "normal" if self.mode_var.get() == "manual" else "disabled"
@@ -163,10 +168,15 @@ class YouTubeTab(PipelineTab):
             messagebox.showwarning("Bad timestamp", "Start/End must be seconds or MM:SS / HH:MM:SS.")
             return
 
+        clips_dir = self.settings.background_clips_dir
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        out_path = clips_dir / f"clip_{int(time.time())}.mp4"
+
         self.log(f"Starting youtube job: {url} (mode={mode})")
         self.run_in_thread(
             lambda: youtube_pipeline.run(
-                url, mode=mode, start=start, end=end, progress_cb=self.report_progress
+                url, mode=mode, start=start, end=end, out_path=out_path,
+                progress_cb=self.report_progress,
             )
         )
 
