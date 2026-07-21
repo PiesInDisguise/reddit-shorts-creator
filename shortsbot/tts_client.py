@@ -64,13 +64,3 @@ def synthesize(
         start_times=alignment_data["character_start_times_seconds"],
         end_times=alignment_data["character_end_times_seconds"],
     )
-
-
-def clamp_speed_for_budget(current_factor_needed: float) -> tuple:
-    """Given how much speed-up is needed overall, return (api_speed, remainder_factor)
-    where api_speed is what we ask ElevenLabs for (clamped to its supported range) and
-    remainder_factor is what must still be applied afterwards via ffmpeg atempo
-    (1.0 if the API speed alone covers it)."""
-    api_speed = min(MAX_API_SPEED, current_factor_needed)
-    remainder = current_factor_needed / api_speed
-    return api_speed, remainder

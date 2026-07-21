@@ -5,8 +5,10 @@ from typing import Callable, Optional
 
 from . import captions, ffmpeg_utils, header_card, reddit_client, tts_client, video_utils
 
-BUDGET_SECONDS = 58.0
-WORDS_PER_SECOND_ESTIMATE = 2.5
+BUDGET_SECONDS = 88.0  # ~1:30 target, minus a small safety margin for encoder rounding
+WORDS_PER_SECOND_ESTIMATE = 2.5  # ~150 wpm, a natural conversational narration pace
+MAX_TOTAL_SPEED = 1.35  # ceiling on narration speed-up -- past this it sounds
+# rushed/hard to follow even with word-flash captions helping comprehension
 
 ProgressCB = Callable[[str, float], None]
 
@@ -15,12 +17,36 @@ def _noop_progress(stage: str, fraction: float) -> None:
     pass
 
 
-def _estimate_speed_needed(text: str, remaining_budget: float) -> float:
-    word_count = max(1, len(text.split()))
+def _truncate_to_sentence(text: str, max_words: int) -> str:
+    """Cut text down to at most max_words, backing up to the last full
+    sentence that fits rather than cutting mid-sentence."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    truncated_words = words[:max_words]
+    for i in range(len(truncated_words) - 1, -1, -1):
+        if truncated_words[i].rstrip().endswith((".", "!", "?")):
+            return " ".join(truncated_words[: i + 1])
+    return " ".join(truncated_words)  # no sentence boundary in range -- hard cut
+
+
+def _prepare_body_for_budget(body_text: str, remaining_budget: float) -> tuple:
+    """Decide the narration speed for body_text, capped at MAX_TOTAL_SPEED. If
+    it still wouldn't fit remaining_budget even at that speed, truncate the
+    body (at a sentence boundary) instead of speaking faster than the cap.
+    Returns (speed, text_to_narrate)."""
+    word_count = max(1, len(body_text.split()))
     estimated_duration = word_count / WORDS_PER_SECOND_ESTIMATE
+
     if remaining_budget <= 0 or estimated_duration <= remaining_budget:
-        return 1.0
-    return estimated_duration / remaining_budget
+        return 1.0, body_text
+
+    needed_factor = estimated_duration / remaining_budget
+    if needed_factor <= MAX_TOTAL_SPEED:
+        return needed_factor, body_text
+
+    max_words = int(remaining_budget * MAX_TOTAL_SPEED * WORDS_PER_SECOND_ESTIMATE)
+    return MAX_TOTAL_SPEED, _truncate_to_sentence(body_text, max_words)
 
 
 def _concat_audio(paths: list, out_path: Path) -> None:
@@ -68,14 +94,15 @@ def run(
     title_duration = ffmpeg_utils.probe_audio_duration(title_path)
 
     # --- Body narration ---
-    body_text = post.body.strip() or post.title  # title-only posts: nothing else to read
-    has_body = bool(post.body.strip())
+    body_text = post.body.strip()
+    has_body = bool(body_text)
 
     remaining_budget = BUDGET_SECONDS - title_duration
-    initial_speed = (
-        _estimate_speed_needed(body_text, remaining_budget) if has_body else 1.0
-    )
-    api_speed, _ = tts_client.clamp_speed_for_budget(initial_speed)
+    if has_body:
+        target_speed, body_text = _prepare_body_for_budget(body_text, remaining_budget)
+    else:
+        target_speed = 1.0
+    api_speed = min(target_speed, tts_client.MAX_API_SPEED)
 
     progress_cb("Synthesizing body narration", 0.15)
     body_path = work_dir / "body.mp3"
@@ -90,10 +117,14 @@ def run(
 
     total_duration = title_duration + body_duration
 
-    # --- Remainder speed-up if the estimate undershot ---
+    # --- Remainder speed-up if the estimate undershot (capped at MAX_TOTAL_SPEED
+    # combined with api_speed -- if that's not enough, the video runs slightly
+    # over budget rather than sounding faster than the cap) ---
     if total_duration > BUDGET_SECONDS and has_body:
-        progress_cb("Adjusting narration speed to fit 60s", 0.45)
-        remainder_factor = total_duration / BUDGET_SECONDS
+        progress_cb("Adjusting narration speed to fit the time budget", 0.45)
+        ideal_remainder = total_duration / BUDGET_SECONDS
+        max_allowed_remainder = MAX_TOTAL_SPEED / api_speed
+        remainder_factor = min(ideal_remainder, max_allowed_remainder)
         sped_body_path = work_dir / "body_sped.mp3"
         ffmpeg_utils.run_ffmpeg(
             [
