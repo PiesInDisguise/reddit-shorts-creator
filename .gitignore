@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.secrets/
+work/
+output/
+cache/
+background_clips/*
+!background_clips/.gitkeep
+.venv/
