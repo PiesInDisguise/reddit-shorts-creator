@@ -1,12 +1,18 @@
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from . import captions, ffmpeg_utils, header_card, reddit_client, tts_client, video_utils
 
 BUDGET_SECONDS = 58.0
 WORDS_PER_SECOND_ESTIMATE = 2.5
+
+ProgressCB = Callable[[str, float], None]
+
+
+def _noop_progress(stage: str, fraction: float) -> None:
+    pass
 
 
 def _estimate_speed_needed(text: str, remaining_budget: float) -> float:
@@ -33,7 +39,10 @@ def run(
     voice_id: Optional[str] = None,
     out_path: Optional[Path] = None,
     keep_work: bool = False,
+    progress_cb: Optional[ProgressCB] = None,
 ) -> Path:
+    progress_cb = progress_cb or _noop_progress
+
     if not ffmpeg_utils.ffmpeg_available():
         raise RuntimeError("ffmpeg/ffprobe not found on PATH. Run `python main.py doctor`.")
 
@@ -43,6 +52,7 @@ def run(
     voice_id = voice_id or settings.elevenlabs_default_voice_id
     icon_cache_dir = Path("cache") / "subreddit_icons"
 
+    progress_cb("Fetching Reddit post", 0.0)
     post = reddit_client.fetch_post(url, settings.reddit_user_agent, icon_cache_dir)
 
     job_id = uuid.uuid4().hex[:8]
@@ -50,6 +60,7 @@ def run(
     work_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Title narration (always normal pace) ---
+    progress_cb("Synthesizing title narration", 0.05)
     title_path = work_dir / "title.mp3"
     title_alignment = tts_client.synthesize(
         post.title, voice_id, settings.elevenlabs_api_key, title_path, speed=1.0
@@ -66,6 +77,7 @@ def run(
     )
     api_speed, _ = tts_client.clamp_speed_for_budget(initial_speed)
 
+    progress_cb("Synthesizing body narration", 0.15)
     body_path = work_dir / "body.mp3"
     if has_body:
         body_alignment = tts_client.synthesize(
@@ -80,6 +92,7 @@ def run(
 
     # --- Remainder speed-up if the estimate undershot ---
     if total_duration > BUDGET_SECONDS and has_body:
+        progress_cb("Adjusting narration speed to fit 60s", 0.45)
         remainder_factor = total_duration / BUDGET_SECONDS
         sped_body_path = work_dir / "body_sped.mp3"
         ffmpeg_utils.run_ffmpeg(
@@ -104,6 +117,7 @@ def run(
         total_duration = title_duration + body_duration
 
     # --- Concatenate narration audio ---
+    progress_cb("Concatenating narration audio", 0.5)
     narration_path = work_dir / "narration.mp3"
     if has_body:
         _concat_audio([title_path, body_path], narration_path)
@@ -111,6 +125,7 @@ def run(
         narration_path = title_path
 
     # --- Captions (body only; title is shown as full text in the header card) ---
+    progress_cb("Building word-flash captions", 0.6)
     body_words = (
         captions.words_from_alignment(body_alignment, time_offset=title_duration)
         if has_body
@@ -122,12 +137,14 @@ def run(
     )
 
     # --- Header card ---
+    progress_cb("Rendering header card", 0.78)
     header_path = work_dir / "header.png"
     header_card.save_header_card_png(
         post.subreddit, post.author, post.title, post.icon_path, settings.impact_font_path, header_path
     )
 
     # --- Background footage ---
+    progress_cb("Preparing background footage", 0.82)
     clip_path = video_utils.pick_background_clip(settings.background_clips_dir)
     clip_info = ffmpeg_utils.probe(clip_path)
     offset = video_utils.pick_background_offset(clip_info["duration"], total_duration)
@@ -176,6 +193,7 @@ def run(
             str(out_path),
         ]
     )
+    progress_cb("Compositing final video", 0.85)
     ffmpeg_utils.run_ffmpeg(args)
 
     if not keep_work:
@@ -183,4 +201,5 @@ def run(
 
         shutil.rmtree(work_dir, ignore_errors=True)
 
+    progress_cb("Done", 1.0)
     return out_path

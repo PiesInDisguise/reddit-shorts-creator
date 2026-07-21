@@ -12,15 +12,17 @@ from . import reddit_pipeline, video_utils, youtube_pipeline
 
 class PipelineTab(ttk.Frame):
     """Shared scaffolding for a tab that runs a long pipeline in a background
-    thread and streams status lines back into a log box."""
+    thread and streams status lines + progress updates back into the UI."""
 
     def __init__(self, parent):
         super().__init__(parent, padding=12)
         self._log_queue = queue.Queue()
+        self._progress_queue = queue.Queue()
         self._last_output_path = None
-        self.after(150, self._drain_log_queue)
+        self._last_progress_fraction = 0.0
+        self.after(150, self._drain_queues)
 
-    def _drain_log_queue(self):
+    def _drain_queues(self):
         try:
             while True:
                 line = self._log_queue.get_nowait()
@@ -30,17 +32,45 @@ class PipelineTab(ttk.Frame):
                 self.log_box.configure(state="disabled")
         except queue.Empty:
             pass
-        self.after(150, self._drain_log_queue)
+
+        try:
+            while True:
+                stage, fraction = self._progress_queue.get_nowait()
+                self.progress_bar["value"] = fraction * 100
+                self.status_label.configure(text=stage)
+        except queue.Empty:
+            pass
+
+        self.after(150, self._drain_queues)
 
     def log(self, message: str):
         self._log_queue.put(message)
+
+    def report_progress(self, stage: str, fraction: float):
+        self._last_progress_fraction = fraction
+        self._progress_queue.put((stage, fraction))
 
     def build_log_box(self, parent):
         box = tk.Text(parent, height=10, width=70, state="disabled", wrap="word")
         box.grid(sticky="nsew")
         return box
 
+    def build_progress_widgets(self, parent):
+        frame = ttk.Frame(parent)
+        self.progress_bar = ttk.Progressbar(frame, mode="determinate", maximum=100)
+        self.progress_bar.pack(fill="x")
+        self.status_label = ttk.Label(frame, text="Idle")
+        self.status_label.pack(anchor="w", pady=(2, 0))
+        return frame
+
+    def reset_progress(self):
+        self._last_progress_fraction = 0.0
+        self.progress_bar["value"] = 0
+        self.status_label.configure(text="Starting...")
+
     def run_in_thread(self, target, on_done=None):
+        self.reset_progress()
+
         def wrapper():
             try:
                 result = target()
@@ -50,9 +80,11 @@ class PipelineTab(ttk.Frame):
                     on_done(result)
             except (ConfigError, FileNotFoundError, ValueError, RuntimeError) as exc:
                 self.log(f"Error: {exc}")
+                self.report_progress("Failed", self._last_progress_fraction)
                 messagebox.showerror("Error", str(exc))
             except Exception as exc:  # unexpected failure, still surface it
                 self.log(f"Unexpected error: {exc!r}")
+                self.report_progress("Failed", self._last_progress_fraction)
                 messagebox.showerror("Unexpected error", str(exc))
 
         threading.Thread(target=wrapper, daemon=True).start()
@@ -104,10 +136,13 @@ class YouTubeTab(PipelineTab):
             side="left", padx=(8, 0)
         )
 
-        ttk.Label(self, text="Log:").grid(row=5, column=0, sticky="w")
+        progress_frame = self.build_progress_widgets(self)
+        progress_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+
+        ttk.Label(self, text="Log:").grid(row=6, column=0, sticky="w")
         self.log_box = self.build_log_box(self)
-        self.log_box.grid(row=6, column=0, columnspan=2, sticky="nsew")
-        self.rowconfigure(6, weight=1)
+        self.log_box.grid(row=7, column=0, columnspan=2, sticky="nsew")
+        self.rowconfigure(7, weight=1)
 
     def _toggle_manual_fields(self):
         state = "normal" if self.mode_var.get() == "manual" else "disabled"
@@ -130,7 +165,9 @@ class YouTubeTab(PipelineTab):
 
         self.log(f"Starting youtube job: {url} (mode={mode})")
         self.run_in_thread(
-            lambda: youtube_pipeline.run(url, mode=mode, start=start, end=end)
+            lambda: youtube_pipeline.run(
+                url, mode=mode, start=start, end=end, progress_cb=self.report_progress
+            )
         )
 
 
@@ -155,10 +192,13 @@ class RedditTab(PipelineTab):
             side="left", padx=(8, 0)
         )
 
-        ttk.Label(self, text="Log:").grid(row=3, column=0, sticky="w")
+        progress_frame = self.build_progress_widgets(self)
+        progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+
+        ttk.Label(self, text="Log:").grid(row=4, column=0, sticky="w")
         self.log_box = self.build_log_box(self)
-        self.log_box.grid(row=4, column=0, columnspan=2, sticky="nsew")
-        self.rowconfigure(4, weight=1)
+        self.log_box.grid(row=5, column=0, columnspan=2, sticky="nsew")
+        self.rowconfigure(5, weight=1)
 
     def _run(self):
         url = self.url_var.get().strip()
@@ -169,7 +209,9 @@ class RedditTab(PipelineTab):
         voice_id = self.voice_var.get().strip() or None
         self.log(f"Starting reddit job: {url}")
         self.run_in_thread(
-            lambda: reddit_pipeline.run(url, self.settings, voice_id=voice_id)
+            lambda: reddit_pipeline.run(
+                url, self.settings, voice_id=voice_id, progress_cb=self.report_progress
+            )
         )
 
 
@@ -178,7 +220,7 @@ def launch():
 
     root = tk.Tk()
     root.title("Shorts Creator")
-    root.geometry("640x480")
+    root.geometry("640x520")
 
     notebook = ttk.Notebook(root)
     notebook.pack(fill="both", expand=True, padx=8, pady=8)
