@@ -1,3 +1,4 @@
+import random
 import unittest
 
 from shortsbot import captions
@@ -31,13 +32,13 @@ class TestChunkWords(unittest.TestCase):
     def test_pairs_words_with_odd_tail(self):
         alignment = make_alignment("ab cd ef")
         words = captions.words_from_alignment(alignment)
-        chunks = captions.chunk_words(words, chunk_size=2)
+        chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=0.0)
         self.assertEqual([c.text for c in chunks], ["ab cd", "ef"])
 
     def test_chunk_end_equals_next_chunk_start(self):
         alignment = make_alignment("ab cd ef gh")
         words = captions.words_from_alignment(alignment)
-        chunks = captions.chunk_words(words, chunk_size=2)
+        chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=0.0)
         self.assertEqual(len(chunks), 2)
         self.assertEqual(chunks[0].end, chunks[1].start)
 
@@ -57,15 +58,30 @@ class TestChunkWords(unittest.TestCase):
     def test_sentence_end_forces_new_chunk(self):
         alignment = make_alignment("Arguing. I hate that")
         words = captions.words_from_alignment(alignment)
-        chunks = captions.chunk_words(words, chunk_size=2)
+        chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=0.0)
         # "Arguing." must not be merged with the next sentence's "I".
         self.assertEqual([c.text for c in chunks], ["Arguing.", "I hate", "that"])
 
     def test_question_and_exclamation_also_force_new_chunk(self):
         alignment = make_alignment("Really? Yes! Absolutely")
         words = captions.words_from_alignment(alignment)
-        chunks = captions.chunk_words(words, chunk_size=2)
+        chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=0.0)
         self.assertEqual([c.text for c in chunks], ["Really?", "Yes!", "Absolutely"])
+
+    def test_single_word_chance_one_forces_every_chunk_solo(self):
+        alignment = make_alignment("one two three four five six")
+        words = captions.words_from_alignment(alignment)
+        chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=1.0)
+        self.assertEqual([c.text for c in chunks], ["one", "two", "three", "four", "five", "six"])
+
+    def test_single_word_chance_produces_mix_of_one_and_two_word_chunks(self):
+        alignment = make_alignment("a b c d e f g h i j k l m n o p")
+        words = captions.words_from_alignment(alignment)
+        chunks = captions.chunk_words(
+            words, chunk_size=2, single_word_chance=0.5, rng=random.Random(7)
+        )
+        lengths = {len(c.text.split()) for c in chunks}
+        self.assertEqual(lengths, {1, 2})
 
 
 if __name__ == "__main__":

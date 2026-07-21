@@ -1,6 +1,7 @@
+import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -73,19 +74,30 @@ def _ends_sentence(word_text: str) -> bool:
     return word_text.rstrip().endswith(SENTENCE_END_CHARS)
 
 
-def chunk_words(words: List[Word], chunk_size: int = 2, final_end: float = None) -> List[Chunk]:
+def chunk_words(
+    words: List[Word],
+    chunk_size: int = 2,
+    final_end: float = None,
+    single_word_chance: float = 0.35,
+    rng: Optional[random.Random] = None,
+) -> List[Chunk]:
     """Group words into chunks of at most `chunk_size`, without ever letting a
     chunk span a sentence boundary -- a word ending in ./!/? always ends its
-    chunk, so the next sentence always starts a fresh one. Each chunk's end is
-    set to the next chunk's start so exactly one caption is showing at every
+    chunk, so the next sentence always starts a fresh one. Each group's target
+    size is randomized between 1 word and `chunk_size` (weighted by
+    single_word_chance) so single-word flashes show up throughout, not just at
+    sentence ends -- otherwise chunks are almost always pairs. Each chunk's end
+    is set to the next chunk's start so exactly one caption is showing at every
     instant (no blank gaps between spoken words)."""
+    rng = rng or random
     chunks: List[Chunk] = []
     i = 0
     n = len(words)
     while i < n:
+        target_size = 1 if rng.random() < single_word_chance else chunk_size
         group = [words[i]]
         i += 1
-        while len(group) < chunk_size and i < n and not _ends_sentence(group[-1].text):
+        while len(group) < target_size and i < n and not _ends_sentence(group[-1].text):
             group.append(words[i])
             i += 1
         text = " ".join(w.text for w in group)
