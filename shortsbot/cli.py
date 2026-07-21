@@ -40,18 +40,12 @@ def cmd_doctor(args, settings: Settings) -> int:
         print("[FAIL] ELEVENLABS_API_KEY is not set (required for reddit mode)")
         ok = False
 
-    if settings.reddit_user_agent and "<your_reddit_username>" not in settings.reddit_user_agent:
-        print("[ok] REDDIT_USER_AGENT is set")
-    else:
-        print("[FAIL] REDDIT_USER_AGENT is not set (or still the placeholder) (required for reddit mode)")
-        ok = False
-
-    if settings.reddit_client_id and settings.reddit_client_secret:
-        print("[ok] REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET are set")
+    if settings.apify_api_token:
+        print("[ok] APIFY_API_TOKEN is set")
     else:
         print(
-            "[FAIL] REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET are not set (required for reddit "
-            "mode - create a free 'script' app at https://www.reddit.com/prefs/apps)"
+            "[FAIL] APIFY_API_TOKEN is not set (required for reddit mode - get one from "
+            "https://console.apify.com/settings/integrations)"
         )
         ok = False
 

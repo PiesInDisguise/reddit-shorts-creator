@@ -15,9 +15,7 @@ class ConfigError(RuntimeError):
 class Settings:
     elevenlabs_api_key: str
     elevenlabs_default_voice_id: str
-    reddit_user_agent: str
-    reddit_client_id: str
-    reddit_client_secret: str
+    apify_api_token: str
     background_clips_dir: Path
     impact_font_path: Path
     enable_upload: bool
@@ -31,9 +29,7 @@ class Settings:
             elevenlabs_default_voice_id=os.environ.get(
                 "ELEVENLABS_DEFAULT_VOICE_ID", "AHc7z8dzjrGlVbbQ8enm"
             ),
-            reddit_user_agent=os.environ.get("REDDIT_USER_AGENT", ""),
-            reddit_client_id=os.environ.get("REDDIT_CLIENT_ID", ""),
-            reddit_client_secret=os.environ.get("REDDIT_CLIENT_SECRET", ""),
+            apify_api_token=os.environ.get("APIFY_API_TOKEN", ""),
             background_clips_dir=Path(
                 os.environ.get("BACKGROUND_CLIPS_DIR", "./background_clips")
             ),
@@ -60,21 +56,11 @@ class Settings:
                 "(copy .env.example to .env and fill it in)."
             )
 
-    def require_reddit_user_agent(self) -> None:
-        if not self.reddit_user_agent or "<your_reddit_username>" in self.reddit_user_agent:
+    def require_apify(self) -> None:
+        if not self.apify_api_token:
             raise ConfigError(
-                "REDDIT_USER_AGENT is not set (or still the placeholder). Reddit requires "
-                "a descriptive User-Agent on every request. Set REDDIT_USER_AGENT in your "
-                ".env file, e.g. 'shortsbot/0.1 by u/yourname'."
-            )
-
-    def require_reddit_oauth(self) -> None:
-        if not self.reddit_client_id or not self.reddit_client_secret:
-            raise ConfigError(
-                "REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET are not set. Reddit blocks anonymous "
-                "JSON scraping from most networks now, so this tool authenticates via "
-                "Reddit's OAuth API. Create a free 'script' app at "
-                "https://www.reddit.com/prefs/apps and put its client id/secret in .env."
+                "APIFY_API_TOKEN is not set. Add it to your .env file. Get one from "
+                "https://console.apify.com/settings/integrations."
             )
 
     def require_upload_enabled(self) -> None:

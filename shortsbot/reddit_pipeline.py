@@ -47,20 +47,13 @@ def run(
         raise RuntimeError("ffmpeg/ffprobe not found on PATH. Run `python main.py doctor`.")
 
     settings.require_elevenlabs()
-    settings.require_reddit_user_agent()
-    settings.require_reddit_oauth()
+    settings.require_apify()
 
     voice_id = voice_id or settings.elevenlabs_default_voice_id
     icon_cache_dir = Path("cache") / "subreddit_icons"
 
     progress_cb("Fetching Reddit post", 0.0)
-    post = reddit_client.fetch_post(
-        url,
-        settings.reddit_user_agent,
-        icon_cache_dir,
-        client_id=settings.reddit_client_id,
-        client_secret=settings.reddit_client_secret,
-    )
+    post = reddit_client.fetch_post(url, settings.apify_api_token, icon_cache_dir)
 
     job_id = uuid.uuid4().hex[:8]
     work_dir = Path("work") / job_id

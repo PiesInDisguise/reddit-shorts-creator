@@ -15,20 +15,13 @@ A personal CLI tool that turns two kinds of source material into vertical (1080x
 2. `python -m venv .venv` then `.venv\Scripts\pip install -r requirements.txt`.
 3. `copy .env.example .env` and fill in:
    - `ELEVENLABS_API_KEY` — required for `reddit` mode.
-   - `REDDIT_USER_AGENT` — required for `reddit` mode, e.g. `shortsbot/0.1 by u/yourname`. Reddit
-     requires a real one on every request (including OAuth API calls below) — must not be left as
-     the `<your_reddit_username>` placeholder.
-   - `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` — required for `reddit` mode. Reddit now blocks
-     anonymous scraping of its public `.json` endpoints from most networks (a hard 403, confirmed
-     to happen even with a legitimate User-Agent and full browser-style headers — this is
-     IP/TLS-fingerprint-level bot detection, not something fixable by tweaking request headers).
-     This tool instead authenticates via Reddit's official OAuth API. To get these:
-     1. Go to <https://www.reddit.com/prefs/apps>, click "create app".
-     2. Choose type **script**, put anything in name/description, and for the redirect URI put
-        `http://localhost:8080` (unused for this flow, but required by the form).
-     3. After creating it, the string under the app name is `REDDIT_CLIENT_ID`; the "secret" field
-        is `REDDIT_CLIENT_SECRET`. No Reddit password is needed — this uses a read-only
-        `client_credentials` grant.
+   - `APIFY_API_TOKEN` — required for `reddit` mode. Reddit hard-blocks anonymous scraping of its
+     public `.json` endpoints from most networks (confirmed 403 even with a legitimate User-Agent
+     and full browser-style headers — this is IP/TLS-fingerprint-level bot detection, not
+     something fixable by tweaking request headers). This tool instead fetches posts through the
+     Apify [`Reddit Scraper Lite`](https://console.apify.com/actors/oAuCIx3ItNrs2okjQ) actor
+     (pay-per-result, runs through Apify's own proxy infrastructure). Get a token from
+     <https://console.apify.com/settings/integrations> and put it in `.env`.
    - `BACKGROUND_CLIPS_DIR` — a folder of your own gameplay-style filler clips (e.g. Minecraft
      parkour) for `reddit` mode. At least one video file is required.
    - `IMPACT_FONT_PATH` — defaults to `C:\Windows\Fonts\impact.ttf` (already present on Windows).
@@ -77,6 +70,6 @@ as `private`/`unlisted` before ever using `public`.
 .venv\Scripts\python -m unittest discover -s tests
 ```
 
-Covers crop-filter math, interval selection, caption word/chunk timing, and Reddit OAuth/JSON
-parsing (mocked network). The YouTube pipeline and caption-rendering pipeline have both been
-manually smoke-tested end-to-end.
+Covers crop-filter math, interval selection, caption word/chunk timing, and Reddit/Apify response
+parsing (mocked network). The YouTube pipeline, caption-rendering pipeline, and the Apify fetch
+(against a real, previously-blocked post URL) have all been manually smoke-tested end-to-end.
