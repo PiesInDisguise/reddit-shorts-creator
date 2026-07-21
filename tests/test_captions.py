@@ -54,6 +54,19 @@ class TestChunkWords(unittest.TestCase):
         for i in range(len(chunks) - 1):
             self.assertEqual(chunks[i].end, chunks[i + 1].start)
 
+    def test_sentence_end_forces_new_chunk(self):
+        alignment = make_alignment("Arguing. I hate that")
+        words = captions.words_from_alignment(alignment)
+        chunks = captions.chunk_words(words, chunk_size=2)
+        # "Arguing." must not be merged with the next sentence's "I".
+        self.assertEqual([c.text for c in chunks], ["Arguing.", "I hate", "that"])
+
+    def test_question_and_exclamation_also_force_new_chunk(self):
+        alignment = make_alignment("Really? Yes! Absolutely")
+        words = captions.words_from_alignment(alignment)
+        chunks = captions.chunk_words(words, chunk_size=2)
+        self.assertEqual([c.text for c in chunks], ["Really?", "Yes!", "Absolutely"])
+
 
 if __name__ == "__main__":
     unittest.main()
