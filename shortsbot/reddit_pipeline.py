@@ -48,12 +48,19 @@ def run(
 
     settings.require_elevenlabs()
     settings.require_reddit_user_agent()
+    settings.require_reddit_oauth()
 
     voice_id = voice_id or settings.elevenlabs_default_voice_id
     icon_cache_dir = Path("cache") / "subreddit_icons"
 
     progress_cb("Fetching Reddit post", 0.0)
-    post = reddit_client.fetch_post(url, settings.reddit_user_agent, icon_cache_dir)
+    post = reddit_client.fetch_post(
+        url,
+        settings.reddit_user_agent,
+        icon_cache_dir,
+        client_id=settings.reddit_client_id,
+        client_secret=settings.reddit_client_secret,
+    )
 
     job_id = uuid.uuid4().hex[:8]
     work_dir = Path("work") / job_id

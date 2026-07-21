@@ -16,6 +16,8 @@ class Settings:
     elevenlabs_api_key: str
     elevenlabs_default_voice_id: str
     reddit_user_agent: str
+    reddit_client_id: str
+    reddit_client_secret: str
     background_clips_dir: Path
     impact_font_path: Path
     enable_upload: bool
@@ -30,6 +32,8 @@ class Settings:
                 "ELEVENLABS_DEFAULT_VOICE_ID", "AHc7z8dzjrGlVbbQ8enm"
             ),
             reddit_user_agent=os.environ.get("REDDIT_USER_AGENT", ""),
+            reddit_client_id=os.environ.get("REDDIT_CLIENT_ID", ""),
+            reddit_client_secret=os.environ.get("REDDIT_CLIENT_SECRET", ""),
             background_clips_dir=Path(
                 os.environ.get("BACKGROUND_CLIPS_DIR", "./background_clips")
             ),
@@ -57,11 +61,20 @@ class Settings:
             )
 
     def require_reddit_user_agent(self) -> None:
-        if not self.reddit_user_agent:
+        if not self.reddit_user_agent or "<your_reddit_username>" in self.reddit_user_agent:
             raise ConfigError(
-                "REDDIT_USER_AGENT is not set. Reddit throttles requests with a "
-                "missing/default User-Agent. Set REDDIT_USER_AGENT in your .env file, "
-                "e.g. 'shortsbot/0.1 by u/yourname'."
+                "REDDIT_USER_AGENT is not set (or still the placeholder). Reddit requires "
+                "a descriptive User-Agent on every request. Set REDDIT_USER_AGENT in your "
+                ".env file, e.g. 'shortsbot/0.1 by u/yourname'."
+            )
+
+    def require_reddit_oauth(self) -> None:
+        if not self.reddit_client_id or not self.reddit_client_secret:
+            raise ConfigError(
+                "REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET are not set. Reddit blocks anonymous "
+                "JSON scraping from most networks now, so this tool authenticates via "
+                "Reddit's OAuth API. Create a free 'script' app at "
+                "https://www.reddit.com/prefs/apps and put its client id/secret in .env."
             )
 
     def require_upload_enabled(self) -> None:

@@ -4,11 +4,12 @@ from unittest.mock import MagicMock, patch
 from shortsbot import reddit_client
 
 
-def _mock_response(json_data=None, content=b"", status_code=200, url=None):
+def _mock_response(json_data=None, content=b"", status_code=200, url=None, text=""):
     resp = MagicMock()
     resp.status_code = status_code
     resp.json.return_value = json_data
     resp.content = content
+    resp.text = text
     resp.url = url
     resp.raise_for_status = MagicMock()
     return resp
@@ -28,6 +29,12 @@ class TestExtractSubAndId(unittest.TestCase):
 
 
 class TestFetchPost(unittest.TestCase):
+    def setUp(self):
+        # The access-token cache is module-level; reset it so tests don't leak
+        # a fake token into each other.
+        reddit_client._token_cache["access_token"] = None
+        reddit_client._token_cache["expires_at"] = 0.0
+
     def test_parses_post_and_icon_fields(self):
         post_json = [
             {
@@ -53,6 +60,11 @@ class TestFetchPost(unittest.TestCase):
             }
         }
 
+        def fake_post(url, auth=None, data=None, headers=None, timeout=None):
+            if url == reddit_client.TOKEN_URL:
+                return _mock_response(json_data={"access_token": "fake-token", "expires_in": 3600})
+            raise AssertionError(f"Unexpected POST url: {url}")
+
         def fake_get(url, headers=None, timeout=None, allow_redirects=None):
             if url.endswith("comments/abc123.json"):
                 return _mock_response(json_data=post_json)
@@ -60,13 +72,16 @@ class TestFetchPost(unittest.TestCase):
                 return _mock_response(json_data=about_json)
             if "icon.png" in url:
                 return _mock_response(content=b"fake-png-bytes")
-            raise AssertionError(f"Unexpected URL requested: {url}")
+            raise AssertionError(f"Unexpected GET url: {url}")
 
-        with patch("shortsbot.reddit_client.requests.get", side_effect=fake_get):
+        with patch("shortsbot.reddit_client.requests.get", side_effect=fake_get), \
+             patch("shortsbot.reddit_client.requests.post", side_effect=fake_post):
             post = reddit_client.fetch_post(
                 "https://www.reddit.com/r/AskReddit/comments/abc123/a_test_title/",
                 user_agent="shortsbot/0.1 by u/test",
                 icon_cache_dir=self._tmp_icon_dir(),
+                client_id="fake-id",
+                client_secret="fake-secret",
             )
 
         self.assertEqual(post.subreddit, "AskReddit")
@@ -89,7 +104,23 @@ class TestFetchPost(unittest.TestCase):
 
     def test_missing_user_agent_raises(self):
         with self.assertRaises(reddit_client.RedditError):
-            reddit_client.fetch_post("https://www.reddit.com/r/x/comments/abc/x/", "", None)
+            reddit_client.fetch_post(
+                "https://www.reddit.com/r/x/comments/abc/x/",
+                user_agent="",
+                icon_cache_dir=None,
+                client_id="id",
+                client_secret="secret",
+            )
+
+    def test_missing_oauth_credentials_raises(self):
+        with self.assertRaises(reddit_client.RedditError):
+            reddit_client.fetch_post(
+                "https://www.reddit.com/r/x/comments/abc/x/",
+                user_agent="shortsbot/0.1 by u/test",
+                icon_cache_dir=None,
+                client_id="",
+                client_secret="",
+            )
 
 
 if __name__ == "__main__":
