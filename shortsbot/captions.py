@@ -17,7 +17,7 @@ SAFE_WIDTH = int(FRAME_WIDTH * 0.9)
 
 # Very slight bounce-pop as each chunk appears: grows in, overshoots 100% a
 # touch, dips back, settles -- just a bit of "oomph", not a distracting effect.
-BOUNCE_SCALES = (0.85, 1.05, 0.98, 1.0)
+BOUNCE_SCALES = (0.92, 1.02, 0.99, 1.0)
 BOUNCE_FPS = 30
 BOUNCE_FRAME_DURATION = 1 / BOUNCE_FPS
 BOUNCE_TOTAL_DURATION = BOUNCE_FRAME_DURATION * len(BOUNCE_SCALES)

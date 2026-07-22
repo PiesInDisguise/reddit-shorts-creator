@@ -2,13 +2,14 @@ from pathlib import Path
 
 from . import ffmpeg_utils
 
-WHOOSH_ASSET_PATH = Path("assets") / "sfx" / "whoosh.wav"
+WHOOSH_ASSET_PATH = Path("assets") / "sfx" / "woosh.mp3"
 
 
 def ensure_whoosh_sound(asset_path: Path = WHOOSH_ASSET_PATH) -> Path:
-    """Return a short synthesized "whoosh" sound effect, generating and caching
-    it on first use. Self-contained (band-passed noise with an amplitude
-    envelope) -- no external sound asset needed."""
+    """Return the "whoosh" sound effect from assets/sfx/woosh.mp3. If it
+    doesn't exist yet, synthesize and cache a placeholder there (self-
+    contained -- band-passed noise with an amplitude envelope). Drop your own
+    woosh.mp3 in that folder to use a real sound effect instead."""
     if asset_path.exists():
         return asset_path
 
