@@ -15,6 +15,13 @@ FRAME_WIDTH = 1080
 FRAME_HEIGHT = 1920
 SAFE_WIDTH = int(FRAME_WIDTH * 0.9)
 
+# Very slight bounce-pop as each chunk appears: grows in, overshoots 100% a
+# touch, dips back, settles -- just a bit of "oomph", not a distracting effect.
+BOUNCE_SCALES = (0.85, 1.05, 0.98, 1.0)
+BOUNCE_FPS = 30
+BOUNCE_FRAME_DURATION = 1 / BOUNCE_FPS
+BOUNCE_TOTAL_DURATION = BOUNCE_FRAME_DURATION * len(BOUNCE_SCALES)
+
 
 @dataclass
 class Word:
@@ -140,6 +147,32 @@ def _render_chunk_image(text: str, font_path: Path) -> Image.Image:
     return canvas
 
 
+def _scaled_frame(base_image: Image.Image, scale: float) -> Image.Image:
+    """Scale base_image around its own center (it's already centered on a
+    full-frame transparent canvas, so this scales the visible text/card
+    around its own center, not the corner)."""
+    if scale == 1.0:
+        return base_image
+    w, h = base_image.size
+    scaled_w = max(1, round(w * scale))
+    scaled_h = max(1, round(h * scale))
+    scaled = base_image.resize((scaled_w, scaled_h), Image.LANCZOS)
+    frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    frame.alpha_composite(scaled, ((w - scaled_w) // 2, (h - scaled_h) // 2))
+    return frame
+
+
+def _render_bounce_frames(text: str, font_path: Path, captions_dir: Path, index: int) -> List[Path]:
+    base_image = _render_chunk_image(text, font_path)
+    paths = []
+    for i, scale in enumerate(BOUNCE_SCALES):
+        frame_image = _scaled_frame(base_image, scale)
+        frame_path = captions_dir / f"chunk_{index:04d}_bounce_{i}.png"
+        frame_image.save(frame_path)
+        paths.append(frame_path)
+    return paths
+
+
 def build_caption_overlay(
     chunks: List[Chunk],
     title_duration: float,
@@ -166,13 +199,21 @@ def build_caption_overlay(
     if title_duration > 0:
         add_entry(blank_path, title_duration)
 
-    for i, chunk in enumerate(chunks):
+    for chunk in chunks:
         if chunk.text not in rendered:
-            safe_name = f"chunk_{len(rendered):04d}.png"
-            chunk_path = captions_dir / safe_name
-            _render_chunk_image(chunk.text, font_path).save(chunk_path)
-            rendered[chunk.text] = chunk_path
-        add_entry(rendered[chunk.text], chunk.end - chunk.start)
+            rendered[chunk.text] = _render_bounce_frames(
+                chunk.text, font_path, captions_dir, len(rendered)
+            )
+        bounce_frames = rendered[chunk.text]
+        chunk_duration = chunk.end - chunk.start
+
+        if chunk_duration >= BOUNCE_TOTAL_DURATION:
+            for frame_path in bounce_frames[:-1]:
+                add_entry(frame_path, BOUNCE_FRAME_DURATION)
+            add_entry(bounce_frames[-1], chunk_duration - BOUNCE_FRAME_DURATION * (len(bounce_frames) - 1))
+        else:
+            # Too short to fit the bounce (fast speech) -- just show it settled.
+            add_entry(bounce_frames[-1], chunk_duration)
 
     # concat demuxer quirk: the last entry's duration is ignored, so repeat the
     # final file once more without a duration line.
