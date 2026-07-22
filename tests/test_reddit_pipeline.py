@@ -17,5 +17,15 @@ class TestAtempoChain(unittest.TestCase):
         self.assertAlmostEqual(product, 3.0, places=3)
 
 
+class TestBuildHashtags(unittest.TestCase):
+    def test_includes_standard_and_subreddit_hashtags(self):
+        tags = reddit_pipeline.build_hashtags("god")
+        self.assertEqual(tags, "#reddit #story #stories #god")
+
+    def test_subreddit_hashtag_matches_subreddit_name(self):
+        tags = reddit_pipeline.build_hashtags("copypasta")
+        self.assertIn("#copypasta", tags)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,10 @@ def _noop_progress(stage: str, fraction: float) -> None:
     pass
 
 
+def build_hashtags(subreddit: str) -> str:
+    return f"#reddit #story #stories #{subreddit}"
+
+
 def _atempo_chain(factor: float) -> str:
     """Build an ffmpeg atempo filter chain for an arbitrary speed factor --
     a single atempo only supports [0.5, 2.0], so factors beyond that are
@@ -45,6 +49,10 @@ def run(
     keep_work: bool = False,
     progress_cb: Optional[ProgressCB] = None,
 ) -> Path:
+    """Fetch the post at url, then render it. See render_post() for the case
+    where the caller already has a fetched RedditPost in hand (e.g. the
+    autonomous picker or the GUI's "Create with Upload" button) and wants to
+    avoid a redundant Apify fetch."""
     progress_cb = progress_cb or _noop_progress
 
     if not ffmpeg_utils.ffmpeg_available():
@@ -53,11 +61,33 @@ def run(
     settings.require_elevenlabs()
     settings.require_apify()
 
-    voice_id = voice_id or voices.load_voices()[0]
     icon_cache_dir = Path("cache") / "subreddit_icons"
-
     progress_cb("Fetching Reddit post", 0.0)
     post = reddit_client.fetch_post(url, settings.apify_api_token, icon_cache_dir)
+
+    return render_post(
+        post, settings, voice_id=voice_id, out_path=out_path,
+        keep_work=keep_work, progress_cb=progress_cb,
+    )
+
+
+def render_post(
+    post,
+    settings,
+    voice_id: Optional[str] = None,
+    out_path: Optional[Path] = None,
+    keep_work: bool = False,
+    progress_cb: Optional[ProgressCB] = None,
+) -> Path:
+    """Render a short from an already-fetched RedditPost (no Apify call)."""
+    progress_cb = progress_cb or _noop_progress
+
+    if not ffmpeg_utils.ffmpeg_available():
+        raise RuntimeError("ffmpeg/ffprobe not found on PATH. Run `python main.py doctor`.")
+
+    settings.require_elevenlabs()
+
+    voice_id = voice_id or voices.load_voices()[0]
 
     job_id = uuid.uuid4().hex[:8]
     work_dir = Path("work") / job_id
@@ -170,7 +200,8 @@ def run(
     # --- Final composite ---
     if out_path is None:
         Path("output").mkdir(parents=True, exist_ok=True)
-        out_path = Path("output") / f"reddit_{post.post_id}_{int(time.time())}.mp4"
+        title_slug = video_utils.sanitize_filename(post.title)
+        out_path = Path("output") / f"{title_slug}_{int(time.time())}.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Both overlays now span the full clip timeline with built-in transparency

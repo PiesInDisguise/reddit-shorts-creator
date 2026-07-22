@@ -62,3 +62,7 @@ class YouTubeUploader(Uploader):
             dry_run=False,
             payload=body,
         )
+
+    def delete(self, video_id: str) -> None:
+        youtube = get_youtube_client(self.client_secrets_file, self.token_file)
+        youtube.videos().delete(id=video_id).execute()

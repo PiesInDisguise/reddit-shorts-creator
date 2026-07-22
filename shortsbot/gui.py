@@ -1,3 +1,4 @@
+import os
 import queue
 import subprocess
 import threading
@@ -7,8 +8,9 @@ from tkinter import messagebox, ttk
 
 from config import ConfigError, Settings
 
-from . import reddit_pipeline, video_utils, voices, youtube_pipeline
+from . import reddit_client, reddit_pipeline, uploaded_videos, video_utils, voices, youtube_pipeline
 from .range_slider import RangeSlider
+from .upload.youtube_upload import YouTubeUploader
 
 
 class PipelineTab(ttk.Frame):
@@ -301,6 +303,9 @@ class RedditTab(PipelineTab):
         ttk.Button(button_row, text="Open output folder", command=self.open_output_folder).pack(
             side="left", padx=(8, 0)
         )
+        ttk.Button(
+            button_row, text="Create with Upload", command=self._run_with_upload
+        ).pack(side="left", padx=(8, 0))
 
         progress_frame = self.build_progress_widgets(self)
         progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8))
@@ -341,6 +346,155 @@ class RedditTab(PipelineTab):
             )
         )
 
+    def _run_with_upload(self):
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showwarning("Missing URL", "Paste a Reddit thread URL first.")
+            return
+        if not self.settings.enable_upload:
+            messagebox.showwarning(
+                "Upload not enabled", "Set ENABLE_UPLOAD=true in .env to use Create with Upload."
+            )
+            return
+
+        voice_id = self.voice_var.get().strip() or None
+        self.log(f"Starting reddit job with upload: {url} (voice={voice_id or 'default'})")
+
+        def job():
+            icon_cache_dir = Path("cache") / "subreddit_icons"
+            self.report_progress("Fetching Reddit post", 0.0)
+            post = reddit_client.fetch_post(url, self.settings.apify_api_token, icon_cache_dir)
+            out_path = reddit_pipeline.render_post(
+                post, self.settings, voice_id=voice_id, progress_cb=self.report_progress
+            )
+            self.log(f"Rendered {out_path}, uploading to YouTube...")
+            uploader = YouTubeUploader(
+                self.settings.youtube_client_secrets_file, self.settings.youtube_token_file
+            )
+            result = uploader.upload(
+                out_path,
+                title=post.title,
+                description=reddit_pipeline.build_hashtags(post.subreddit),
+                privacy="public",
+            )
+            self.log(f"Uploaded to {result.platform}: {result.url}")
+            uploaded_videos.record_upload(
+                out_path.name, result.platform, result.video_id, result.url
+            )
+            return out_path
+
+        self.run_in_thread(job)
+
+
+class LibraryTab(ttk.Frame):
+    """Browse and delete previously generated shorts in output/."""
+
+    def __init__(self, parent, settings: Settings):
+        super().__init__(parent, padding=12)
+        self.settings = settings
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+
+        top_row = ttk.Frame(self)
+        top_row.grid(row=0, column=0, sticky="ew")
+        ttk.Button(top_row, text="Refresh", command=self.refresh).pack(side="left")
+        ttk.Button(
+            top_row, text="Open in folder", command=self._open_selected_in_folder
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(top_row, text="Play", command=self._play_selected).pack(
+            side="left", padx=(8, 0)
+        )
+        self.delete_button = ttk.Button(top_row, text="Delete", command=self._delete_selected)
+        self.delete_button.pack(side="left", padx=(8, 0))
+
+        list_frame = ttk.Frame(self)
+        list_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        self.listbox = tk.Listbox(list_frame, selectmode="extended")
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.listbox.configure(yscrollcommand=scrollbar.set)
+
+        self._paths = []
+        self.refresh()
+
+    def refresh(self):
+        out_dir = Path("output")
+        paths = sorted(out_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True) if out_dir.exists() else []
+        self._paths = paths
+        self.listbox.delete(0, "end")
+        for p in paths:
+            size_mb = p.stat().st_size / (1024 * 1024)
+            self.listbox.insert("end", f"{p.name}  ({size_mb:.1f} MB)")
+
+    def _selected_paths(self):
+        return [self._paths[i] for i in self.listbox.curselection()]
+
+    def _open_selected_in_folder(self):
+        selected = self._selected_paths()
+        if not selected:
+            messagebox.showinfo("No selection", "Select a short first.")
+            return
+        subprocess.run(["explorer", "/select,", str(selected[0])])
+
+    def _play_selected(self):
+        selected = self._selected_paths()
+        if not selected:
+            messagebox.showinfo("No selection", "Select a short first.")
+            return
+        os.startfile(str(selected[0]))
+
+    def _delete_selected(self):
+        selected = self._selected_paths()
+        if not selected:
+            messagebox.showinfo("No selection", "Select a short first.")
+            return
+
+        infos = [(p, uploaded_videos.get_upload_info(p.name)) for p in selected]
+        youtube_count = sum(1 for _, info in infos if info and info.get("platform") == "youtube")
+        names = "\n".join(p.name for p in selected)
+        warning = (
+            f"\n\n{youtube_count} of these will also be deleted from YouTube."
+            if youtube_count
+            else ""
+        )
+        if not messagebox.askyesno(
+            "Delete shorts?", f"Permanently delete {len(selected)} file(s)?{warning}\n\n{names}"
+        ):
+            return
+
+        self.delete_button.configure(state="disabled")
+
+        def worker():
+            errors = []
+            for path, info in infos:
+                if info and info.get("platform") == "youtube":
+                    try:
+                        uploader = YouTubeUploader(
+                            self.settings.youtube_client_secrets_file,
+                            self.settings.youtube_token_file,
+                        )
+                        uploader.delete(info["video_id"])
+                        uploaded_videos.remove_upload(path.name)
+                    except Exception as exc:
+                        errors.append(f"{path.name}: failed to delete from YouTube ({exc})")
+                        continue
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    errors.append(f"{path.name}: failed to delete file ({exc})")
+            self.after(0, lambda: self._on_delete_done(errors))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_delete_done(self, errors):
+        self.delete_button.configure(state="normal")
+        self.refresh()
+        if errors:
+            messagebox.showerror("Some deletions failed", "\n".join(errors))
+
 
 def launch():
     settings = Settings.load()
@@ -354,8 +508,10 @@ def launch():
 
     youtube_tab = YouTubeTab(notebook, settings)
     reddit_tab = RedditTab(notebook, settings)
+    library_tab = LibraryTab(notebook, settings)
     notebook.add(youtube_tab, text="YouTube")
     notebook.add(reddit_tab, text="Reddit")
+    notebook.add(library_tab, text="Library")
 
     root.mainloop()
 

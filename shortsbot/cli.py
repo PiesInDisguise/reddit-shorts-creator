@@ -1,10 +1,11 @@
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from config import ConfigError, Settings
 
-from . import reddit_pipeline, video_utils, youtube_pipeline
+from . import autopicker, reddit_pipeline, uploaded_videos, used_posts, video_utils, youtube_pipeline
 from .ffmpeg_utils import ffmpeg_available
 from .upload.base import NotConfiguredError, Uploader
 from .upload.instagram_upload import InstagramUploader
@@ -121,6 +122,47 @@ def cmd_reddit(args, settings: Settings) -> int:
     return 0
 
 
+def cmd_auto_loop(args, settings: Settings) -> int:
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpeg/ffprobe not found on PATH. Run `python main.py doctor`.")
+    settings.require_elevenlabs()
+    settings.require_apify()
+    settings.require_upload_enabled()
+
+    uploader = UPLOADERS["youtube"](settings)
+    icon_cache_dir = Path("cache") / "subreddit_icons"
+
+    print(f"Starting auto-loop on r/{args.subreddit} every {args.interval_seconds}s. Ctrl+C to stop.")
+    while True:
+        cycle_start = time.time()
+        try:
+            post = autopicker.pick_post(args.subreddit, settings.apify_api_token, icon_cache_dir)
+            if post is None:
+                print("No usable post found this cycle (all candidates used or too long), skipping.")
+            else:
+                print(f"Picked post {post.post_id!r}: {post.title!r}")
+                out_path = reddit_pipeline.render_post(post, settings)
+                print(f"Rendered {out_path}")
+                result = uploader.upload(
+                    out_path,
+                    title=post.title,
+                    description=reddit_pipeline.build_hashtags(post.subreddit),
+                    privacy="public",
+                )
+                print(f"Uploaded to {result.platform}: {result.url}")
+                uploaded_videos.record_upload(
+                    out_path.name, result.platform, result.video_id, result.url
+                )
+                used_posts.mark_used(post.post_id)
+        except Exception as exc:
+            print(f"Error during auto-loop cycle: {exc}", file=sys.stderr)
+
+        elapsed = time.time() - cycle_start
+        remaining = args.interval_seconds - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+
+
 UPLOADERS = {
     "youtube": lambda s: YouTubeUploader(s.youtube_client_secrets_file, s.youtube_token_file),
     "tiktok": lambda s: TikTokUploader(
@@ -153,6 +195,9 @@ def cmd_upload(args, settings: Settings) -> int:
         print(result.payload)
     else:
         print(f"Uploaded to {result.platform}: {result.url}")
+        uploaded_videos.record_upload(
+            Path(args.video_path).name, result.platform, result.video_id, result.url
+        )
     return 0
 
 
@@ -192,6 +237,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_reddit.add_argument("--out")
     p_reddit.add_argument("--keep-work", action="store_true")
 
+    p_auto = sub.add_parser(
+        "auto-loop",
+        help="Continuously pick, generate, and upload shorts from a subreddit forever",
+    )
+    p_auto.add_argument("--subreddit", default="copypasta")
+    p_auto.add_argument("--interval-seconds", type=float, default=3600.0)
+
     p_upload = sub.add_parser("upload", help="Upload a finished short to a platform")
     p_upload.add_argument("video_path")
     p_upload.add_argument("--platform", choices=["youtube", "tiktok", "instagram"], required=True)
@@ -216,6 +268,7 @@ def main() -> int:
         "giga-sample": cmd_giga_sample,
         "reddit": cmd_reddit,
         "upload": cmd_upload,
+        "auto-loop": cmd_auto_loop,
     }
 
     try:

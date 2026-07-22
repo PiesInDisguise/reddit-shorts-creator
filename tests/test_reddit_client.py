@@ -56,6 +56,39 @@ class TestFetchPost(unittest.TestCase):
         self.assertTrue(post.icon_path.exists())
         self.assertEqual(post.icon_path.read_bytes(), b"fake-icon-bytes")
 
+    def test_strips_view_in_app_link_and_bare_urls(self):
+        dataset_items = [
+            {
+                "id": "t3_artifact",
+                "parsedId": "artifact",
+                "title": "A copypasta",
+                "body": (
+                    "Some real narrated content here.\n\n"
+                    "[View in app](https://reddit.com/r/copypasta/comments/artifact)\n"
+                    "Check this out https://example.com/thing too."
+                ),
+                "username": "some_user",
+                "parsedCommunityName": "copypasta",
+                "contentType": "text",
+                "dataType": "post",
+            }
+        ]
+
+        with patch(
+            "shortsbot.reddit_client.requests.post",
+            return_value=_mock_response(json_data=dataset_items),
+        ):
+            post = reddit_client.fetch_post(
+                "https://www.reddit.com/r/copypasta/comments/artifact/x/",
+                apify_api_token="fake-token",
+                icon_cache_dir=self._tmp_dir(),
+            )
+
+        self.assertIn("Some real narrated content here.", post.body)
+        self.assertNotIn("View in app", post.body)
+        self.assertNotIn("view in app", post.body.lower())
+        self.assertNotIn("https://", post.body)
+
     def test_non_text_post_skips_icon(self):
         dataset_items = [
             {
@@ -102,6 +135,68 @@ class TestFetchPost(unittest.TestCase):
                 "https://www.reddit.com/r/x/comments/abc/x/",
                 apify_api_token="",
                 icon_cache_dir=self._tmp_dir(),
+            )
+
+    def _tmp_dir(self):
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        return d
+
+
+class TestFetchTopPosts(unittest.TestCase):
+    def test_returns_only_post_items_in_order(self):
+        dataset_items = [
+            {
+                "id": "t3_first",
+                "parsedId": "first",
+                "title": "First post",
+                "body": "Some body text here.",
+                "username": "user_a",
+                "parsedCommunityName": "copypasta",
+                "contentType": "text",
+                "dataType": "post",
+            },
+            {
+                "id": "t5_community",
+                "parsedId": "community",
+                "dataType": "community",
+            },
+            {
+                "id": "t3_second",
+                "parsedId": "second",
+                "title": "Second post",
+                "body": "Another body of text.",
+                "username": "user_b",
+                "parsedCommunityName": "copypasta",
+                "contentType": "text",
+                "dataType": "post",
+            },
+        ]
+
+        def fake_post(url, params=None, json=None, timeout=None):
+            self.assertEqual(url, reddit_client.RUN_SYNC_URL)
+            self.assertEqual(params, {"token": "fake-token"})
+            self.assertIn("/r/copypasta/top/?t=day", json["startUrls"][0]["url"])
+            return _mock_response(json_data=dataset_items)
+
+        with patch("shortsbot.reddit_client.requests.post", side_effect=fake_post):
+            posts = reddit_client.fetch_top_posts(
+                "copypasta", "day", apify_api_token="fake-token",
+                icon_cache_dir=self._tmp_dir(), max_items=15,
+            )
+
+        self.assertEqual([p.post_id for p in posts], ["first", "second"])
+        self.assertEqual(posts[0].title, "First post")
+        self.assertEqual(posts[1].title, "Second post")
+
+    def test_missing_token_raises(self):
+        with self.assertRaises(reddit_client.RedditError):
+            reddit_client.fetch_top_posts(
+                "copypasta", "day", apify_api_token="", icon_cache_dir=self._tmp_dir(),
             )
 
     def _tmp_dir(self):
