@@ -74,7 +74,7 @@ def words_from_alignment(alignment: Alignment, time_offset: float = 0.0) -> List
     return words
 
 
-SENTENCE_END_CHARS = (".", "!", "?")
+SENTENCE_END_CHARS = (".", "!", "?", ")")
 
 
 def _ends_sentence(word_text: str) -> bool:
@@ -89,8 +89,9 @@ def chunk_words(
     rng: Optional[random.Random] = None,
 ) -> List[Chunk]:
     """Group words into chunks of at most `chunk_size`, without ever letting a
-    chunk span a sentence boundary -- a word ending in ./!/? always ends its
-    chunk, so the next sentence always starts a fresh one. Each group's target
+    chunk span a sentence or parenthetical boundary -- a word ending in ./!/?/)
+    always ends its chunk, so the next sentence (or post-parenthesis text)
+    always starts a fresh one. Each group's target
     size is randomized between 1 word and `chunk_size` (weighted by
     single_word_chance) so single-word flashes show up throughout, not just at
     sentence ends -- otherwise chunks are almost always pairs. Each chunk's end

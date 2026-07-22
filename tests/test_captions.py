@@ -68,6 +68,15 @@ class TestChunkWords(unittest.TestCase):
         chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=0.0)
         self.assertEqual([c.text for c in chunks], ["Really?", "Yes!", "Absolutely"])
 
+    def test_closing_parenthesis_forces_new_chunk(self):
+        alignment = make_alignment("I said (obviously) that was true")
+        words = captions.words_from_alignment(alignment)
+        chunks = captions.chunk_words(words, chunk_size=2, single_word_chance=0.0)
+        # "(obviously)" must not be merged with the following "that".
+        self.assertEqual(
+            [c.text for c in chunks], ["I said", "(obviously)", "that was", "true"]
+        )
+
     def test_single_word_chance_one_forces_every_chunk_solo(self):
         alignment = make_alignment("one two three four five six")
         words = captions.words_from_alignment(alignment)
