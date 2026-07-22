@@ -6,11 +6,10 @@ A personal CLI tool that turns two kinds of source material into vertical (1080x
   `background_clips/`. This mode exists specifically to prepare filler footage (e.g. Minecraft
   parkour) for `reddit` mode to use — not to produce a final short on its own.
 - **`reddit`** — turn a Reddit thread into a narrated "Reddit story" short: AI voiceover (title,
-  then body) via [Chatterbox TTS](https://github.com/resemble-ai/chatterbox) running on a Modal
-  cloud GPU, a subreddit header card, word-flash captions synced to the narration (via Whisper
-  forced alignment on the generated audio), and background gameplay-style filler footage (from
-  `background_clips/`, e.g. footage prepared via `youtube` mode above) plus a quiet background
-  music bed. Saves the finished short to `output/`.
+  then body) via ElevenLabs, a subreddit header card, word-flash captions synced to the narration
+  (via ElevenLabs' own word-timestamp alignment), and background gameplay-style filler footage
+  (from `background_clips/`, e.g. footage prepared via `youtube` mode above) plus a quiet
+  background music bed. Saves the finished short to `output/`.
 
 ## Setup
 
@@ -18,12 +17,8 @@ A personal CLI tool that turns two kinds of source material into vertical (1080x
    ffmpeg 8.1 (`qtrle`/`prores_ks`/`ffv1` alpha-capable encoders required — most full builds have
    these).
 2. `python -m venv .venv` then `.venv\Scripts\pip install -r requirements.txt`.
-3. A [Modal](https://modal.com) account, authenticated locally (`modal token set --token-id ...
-   --token-secret ...` — get these from your Modal dashboard), then deploy the TTS app once with
-   `modal deploy modal_tts_app.py`. This builds a Chatterbox TTS + faster-whisper image and deploys
-   it to a Modal GPU (T4) function; `reddit` mode calls it remotely for every narration. Re-run
-   `modal deploy` any time `modal_tts_app.py` changes.
-4. `copy .env.example .env` and fill in:
+3. `copy .env.example .env` and fill in:
+   - `ELEVENLABS_API_KEY` — required for `reddit` mode.
    - `APIFY_API_TOKEN` — required for `reddit` mode. Reddit hard-blocks anonymous scraping of its
      public `.json` endpoints from most networks (confirmed 403 even with a legitimate User-Agent
      and full browser-style headers — this is IP/TLS-fingerprint-level bot detection, not
@@ -34,7 +29,7 @@ A personal CLI tool that turns two kinds of source material into vertical (1080x
    - `BACKGROUND_CLIPS_DIR` — a folder of your own gameplay-style filler clips (e.g. Minecraft
      parkour) for `reddit` mode. At least one video file is required.
    - `IMPACT_FONT_PATH` — defaults to `C:\Windows\Fonts\impact.ttf` (already present on Windows).
-5. Run `python main.py doctor` to verify everything above is in place.
+4. Run `python main.py doctor` to verify everything above is in place.
 
 ## Usage
 
@@ -42,13 +37,16 @@ A personal CLI tool that turns two kinds of source material into vertical (1080x
 python main.py doctor
 
 python main.py youtube <url> [--mode random|manual] [--start SS] [--end SS] [--out PATH]
-python main.py reddit <url> [--out PATH]
+python main.py reddit <url> [--voice-id ID] [--out PATH]
 ```
 
 - `youtube --mode random` (default) picks a random 60-second window from the source video.
   `--mode manual --start 10 --end 40` uses an explicit range (clamped to 60s max).
 - `youtube` saves into `background_clips/` by default; pass `--out PATH` to save elsewhere instead.
-- `reddit` saves the finished short into `output/`.
+- `reddit` saves the finished short into `output/`. `--voice-id` picks an ElevenLabs voice; without
+  it, the first entry in `voices.json` is used. `voices.json` is a simple saved list of voice IDs
+  (seeded with two defaults on first run) — the GUI's Reddit tab has a dropdown to switch between
+  saved voices and a "+ Add" button to save a new voice ID into that list for next time.
 
 ### Uploading
 
@@ -91,7 +89,7 @@ and upload as `private`/`unlisted` before ever using `public`.
 .venv\Scripts\python -m unittest discover -s tests
 ```
 
-Covers crop-filter math, interval selection, caption word/chunk timing, TTS alignment expansion,
-and Reddit/Apify response parsing (mocked network). The YouTube pipeline, caption-rendering
-pipeline, Apify fetch, and the Chatterbox/Whisper Modal round trip have all been manually
-smoke-tested end-to-end.
+Covers crop-filter math, interval selection, caption word/chunk timing, ElevenLabs TTS request/
+response handling, the saved-voices list, and Reddit/Apify response parsing (all with mocked
+network). The YouTube pipeline, caption-rendering pipeline, Apify fetch, and a real ElevenLabs
+synthesize() call have all been manually smoke-tested end-to-end.

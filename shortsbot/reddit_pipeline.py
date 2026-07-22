@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import bgmusic, captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils
+from . import bgmusic, captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils, voices
 
 BUDGET_SECONDS = 118.0  # ~2:00 target, minus a small safety margin for encoder rounding
 
@@ -40,6 +40,7 @@ def _concat_audio(paths: list, out_path: Path) -> None:
 def run(
     url: str,
     settings,
+    voice_id: Optional[str] = None,
     out_path: Optional[Path] = None,
     keep_work: bool = False,
     progress_cb: Optional[ProgressCB] = None,
@@ -49,8 +50,10 @@ def run(
     if not ffmpeg_utils.ffmpeg_available():
         raise RuntimeError("ffmpeg/ffprobe not found on PATH. Run `python main.py doctor`.")
 
+    settings.require_elevenlabs()
     settings.require_apify()
 
+    voice_id = voice_id or voices.load_voices()[0]
     icon_cache_dir = Path("cache") / "subreddit_icons"
 
     progress_cb("Fetching Reddit post", 0.0)
@@ -63,19 +66,19 @@ def run(
     # --- Title narration (always normal pace) ---
     progress_cb("Synthesizing title narration", 0.05)
     title_path = work_dir / "title.mp3"
-    title_alignment = tts_client.synthesize(post.title, title_path)
+    title_alignment = tts_client.synthesize(post.title, voice_id, settings.elevenlabs_api_key, title_path)
     title_duration = ffmpeg_utils.probe_audio_duration(title_path)
 
-    # --- Body narration (always generated at natural pace -- Chatterbox has
-    # no speed control, so any needed speed-up happens below via atempo,
-    # based on the actually-measured duration rather than a pre-estimate) ---
+    # --- Body narration (always generated at natural pace; any needed
+    # speed-up happens below via atempo, based on the actually-measured
+    # duration rather than a pre-estimate) ---
     body_text = post.body.strip()
     has_body = bool(body_text)
 
     progress_cb("Synthesizing body narration", 0.15)
     body_path = work_dir / "body.mp3"
     if has_body:
-        body_alignment = tts_client.synthesize(body_text, body_path)
+        body_alignment = tts_client.synthesize(body_text, voice_id, settings.elevenlabs_api_key, body_path)
         body_duration = ffmpeg_utils.probe_audio_duration(body_path)
     else:
         body_alignment = tts_client.Alignment(characters=[], start_times=[], end_times=[])

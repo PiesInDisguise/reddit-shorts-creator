@@ -13,6 +13,7 @@ class ConfigError(RuntimeError):
 
 @dataclass
 class Settings:
+    elevenlabs_api_key: str
     apify_api_token: str
     background_clips_dir: Path
     impact_font_path: Path
@@ -30,6 +31,7 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         return cls(
+            elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY", ""),
             apify_api_token=os.environ.get("APIFY_API_TOKEN", ""),
             background_clips_dir=Path(
                 os.environ.get("BACKGROUND_CLIPS_DIR", "./background_clips")
@@ -60,6 +62,13 @@ class Settings:
             ig_business_account_id=os.environ.get("IG_BUSINESS_ACCOUNT_ID", ""),
             ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN", ""),
         )
+
+    def require_elevenlabs(self) -> None:
+        if not self.elevenlabs_api_key:
+            raise ConfigError(
+                "ELEVENLABS_API_KEY is not set. Add it to your .env file "
+                "(copy .env.example to .env and fill it in)."
+            )
 
     def require_apify(self) -> None:
         if not self.apify_api_token:

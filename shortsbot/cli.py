@@ -35,6 +35,12 @@ def cmd_doctor(args, settings: Settings) -> int:
         print(f"[FAIL] Impact font not found at {settings.impact_font_path}")
         ok = False
 
+    if settings.elevenlabs_api_key:
+        print("[ok] ELEVENLABS_API_KEY is set")
+    else:
+        print("[FAIL] ELEVENLABS_API_KEY is not set (required for reddit mode)")
+        ok = False
+
     if settings.apify_api_token:
         print("[ok] APIFY_API_TOKEN is set")
     else:
@@ -91,6 +97,7 @@ def cmd_reddit(args, settings: Settings) -> int:
     out = reddit_pipeline.run(
         args.url,
         settings,
+        voice_id=args.voice_id,
         out_path=out_path,
         keep_work=args.keep_work,
     )
@@ -153,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_reddit = sub.add_parser("reddit", help="Turn a Reddit thread into a narrated short")
     p_reddit.add_argument("url")
+    p_reddit.add_argument("--voice-id", help="ElevenLabs voice ID (defaults to the first saved voice)")
     p_reddit.add_argument("--out")
     p_reddit.add_argument("--keep-work", action="store_true")
 

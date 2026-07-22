@@ -8,7 +8,7 @@ from tkinter import messagebox, ttk
 
 from config import ConfigError, Settings
 
-from . import reddit_pipeline, video_utils, youtube_pipeline
+from . import reddit_pipeline, video_utils, voices, youtube_pipeline
 
 
 class PipelineTab(ttk.Frame):
@@ -191,20 +191,49 @@ class RedditTab(PipelineTab):
         self.url_var = tk.StringVar()
         ttk.Entry(self, textvariable=self.url_var).grid(row=0, column=1, sticky="ew", padx=6)
 
+        ttk.Label(self, text="Voice:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        voice_frame = ttk.Frame(self)
+        voice_frame.grid(row=1, column=1, sticky="ew", padx=6, pady=(8, 0))
+        voice_frame.columnconfigure(0, weight=1)
+        self.voice_var = tk.StringVar()
+        self.voice_combo = ttk.Combobox(voice_frame, textvariable=self.voice_var)
+        self.voice_combo.grid(row=0, column=0, sticky="ew")
+        ttk.Button(voice_frame, text="+ Add", command=self._add_voice).grid(
+            row=0, column=1, padx=(6, 0)
+        )
+        self._refresh_voices()
+
         button_row = ttk.Frame(self)
-        button_row.grid(row=1, column=0, columnspan=2, pady=10, sticky="w")
+        button_row.grid(row=2, column=0, columnspan=2, pady=10, sticky="w")
         ttk.Button(button_row, text="Run", command=self._run).pack(side="left")
         ttk.Button(button_row, text="Open output folder", command=self.open_output_folder).pack(
             side="left", padx=(8, 0)
         )
 
         progress_frame = self.build_progress_widgets(self)
-        progress_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8))
 
-        ttk.Label(self, text="Log:").grid(row=3, column=0, sticky="w")
+        ttk.Label(self, text="Log:").grid(row=4, column=0, sticky="w")
         self.log_box = self.build_log_box(self)
-        self.log_box.grid(row=4, column=0, columnspan=2, sticky="nsew")
-        self.rowconfigure(4, weight=1)
+        self.log_box.grid(row=5, column=0, columnspan=2, sticky="nsew")
+        self.rowconfigure(5, weight=1)
+
+    def _refresh_voices(self):
+        voice_list = voices.load_voices()
+        self.voice_combo["values"] = voice_list
+        if voice_list and not self.voice_var.get():
+            self.voice_var.set(voice_list[0])
+
+    def _add_voice(self):
+        new_id = self.voice_var.get().strip()
+        if not new_id:
+            messagebox.showwarning(
+                "No voice ID", "Type a voice ID into the field, then click + Add."
+            )
+            return
+        updated = voices.add_voice(new_id)
+        self.voice_combo["values"] = updated
+        self.log(f"Added voice: {new_id}")
 
     def _run(self):
         url = self.url_var.get().strip()
@@ -212,9 +241,12 @@ class RedditTab(PipelineTab):
             messagebox.showwarning("Missing URL", "Paste a Reddit thread URL first.")
             return
 
-        self.log(f"Starting reddit job: {url}")
+        voice_id = self.voice_var.get().strip() or None
+        self.log(f"Starting reddit job: {url} (voice={voice_id or 'default'})")
         self.run_in_thread(
-            lambda: reddit_pipeline.run(url, self.settings, progress_cb=self.report_progress)
+            lambda: reddit_pipeline.run(
+                url, self.settings, voice_id=voice_id, progress_cb=self.report_progress
+            )
         )
 
 
