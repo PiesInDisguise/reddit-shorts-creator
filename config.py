@@ -27,7 +27,7 @@ class Settings:
         return cls(
             elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY", ""),
             elevenlabs_default_voice_id=os.environ.get(
-                "ELEVENLABS_DEFAULT_VOICE_ID", "AHc7z8dzjrGlVbbQ8enm"
+                "ELEVENLABS_DEFAULT_VOICE_ID", "TX3LPaxmHKxFdv7VOQHJ"
             ),
             apify_api_token=os.environ.get("APIFY_API_TOKEN", ""),
             background_clips_dir=Path(
