@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils
+from . import bgmusic, captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils
 
 BUDGET_SECONDS = 118.0  # ~2:00 target, minus a small safety margin for encoder rounding
 WORDS_PER_SECOND_ESTIMATE = 2.5  # ~150 wpm, a natural conversational narration pace
@@ -169,6 +169,16 @@ def run(
     # --- Whoosh sound effect, timed to the header's pop-in ---
     whoosh_path = sfx.ensure_whoosh_sound()
 
+    # --- Background music bed, quiet under the narration ---
+    progress_cb("Preparing background music", 0.8)
+    music_path = bgmusic.ensure_background_music()
+    music_duration = ffmpeg_utils.probe_audio_duration(music_path)
+    music_offset = video_utils.pick_background_offset(music_duration, total_duration)
+    if music_offset is not None:
+        music_input_args = ["-ss", str(music_offset), "-i", str(music_path)]
+    else:
+        music_input_args = ["-stream_loop", "-1", "-i", str(music_path)]
+
     # --- Background footage ---
     progress_cb("Preparing background footage", 0.82)
     clip_path = video_utils.pick_background_clip(settings.background_clips_dir)
@@ -194,7 +204,8 @@ def run(
         f"[bg][1:v]overlay=0:0[bgh];"
         f"[bgh][2:v]overlay=0:0[vout];"
         f"[4:a]volume=0.55[woosh];"
-        f"[3:a][woosh]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        f"[5:a]volume=0.18[music];"
+        f"[3:a][woosh][music]amix=inputs=3:duration=first:dropout_transition=0:normalize=0,"
         f"alimiter=limit=0.95[aout]"
     )
 
@@ -204,6 +215,7 @@ def run(
         + ["-i", str(caption_overlay_path)]
         + ["-i", str(narration_path)]
         + ["-i", str(whoosh_path)]
+        + music_input_args
         + [
             "-filter_complex",
             filter_complex,

@@ -6,6 +6,7 @@ work/
 output/
 cache/
 assets/sfx/
+assets/music/
 background_clips/*
 !background_clips/.gitkeep
 .venv/
