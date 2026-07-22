@@ -1,7 +1,6 @@
 import queue
 import subprocess
 import threading
-import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -9,6 +8,7 @@ from tkinter import messagebox, ttk
 from config import ConfigError, Settings
 
 from . import reddit_pipeline, video_utils, voices, youtube_pipeline
+from .range_slider import RangeSlider
 
 
 class PipelineTab(ttk.Frame):
@@ -75,8 +75,12 @@ class PipelineTab(ttk.Frame):
         def wrapper():
             try:
                 result = target()
-                self.log(f"Done: {result}")
-                self._last_output_path = Path(result)
+                if isinstance(result, (list, tuple)):
+                    self.log(f"Done: wrote {len(result)} file(s)")
+                    self._last_output_path = Path(result[-1]) if result else None
+                else:
+                    self.log(f"Done: {result}")
+                    self._last_output_path = Path(result)
                 if on_done:
                     on_done(result)
             except (ConfigError, FileNotFoundError, ValueError, RuntimeError) as exc:
@@ -141,13 +145,46 @@ class YouTubeTab(PipelineTab):
             button_row, text="Open background clips folder", command=self.open_output_folder
         ).pack(side="left", padx=(8, 0))
 
-        progress_frame = self.build_progress_widgets(self)
-        progress_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        ttk.Separator(self, orient="horizontal").grid(
+            row=6, column=0, columnspan=2, sticky="ew", pady=(10, 6)
+        )
 
-        ttk.Label(self, text="Log:").grid(row=7, column=0, sticky="w")
+        ttk.Label(self, text="Giga Sample: cut multiple background clips from one video").grid(
+            row=7, column=0, columnspan=2, sticky="w"
+        )
+
+        giga_top_row = ttk.Frame(self)
+        giga_top_row.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.load_info_button = ttk.Button(
+            giga_top_row, text="Load Info", command=self._load_giga_info
+        )
+        self.load_info_button.pack(side="left")
+        self.giga_status_var = tk.StringVar(value="No video loaded")
+        ttk.Label(giga_top_row, textvariable=self.giga_status_var).pack(side="left", padx=(8, 0))
+
+        self._giga_duration = 0.0
+        self._giga_title = ""
+        self.range_slider = RangeSlider(self, width=480, height=50)
+        self.range_slider.grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        giga_bottom_row = ttk.Frame(self)
+        giga_bottom_row.grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(giga_bottom_row, text="Clips:").pack(side="left")
+        self.giga_count_var = tk.IntVar(value=5)
+        ttk.Spinbox(
+            giga_bottom_row, from_=1, to=50, textvariable=self.giga_count_var, width=5
+        ).pack(side="left", padx=(4, 10))
+        ttk.Button(giga_bottom_row, text="Giga Sample", command=self._run_giga_sample).pack(
+            side="left"
+        )
+
+        progress_frame = self.build_progress_widgets(self)
+        progress_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+
+        ttk.Label(self, text="Log:").grid(row=12, column=0, sticky="w")
         self.log_box = self.build_log_box(self)
-        self.log_box.grid(row=8, column=0, columnspan=2, sticky="nsew")
-        self.rowconfigure(8, weight=1)
+        self.log_box.grid(row=13, column=0, columnspan=2, sticky="nsew")
+        self.rowconfigure(13, weight=1)
 
     def _toggle_manual_fields(self):
         state = "normal" if self.mode_var.get() == "manual" else "disabled"
@@ -168,14 +205,69 @@ class YouTubeTab(PipelineTab):
             messagebox.showwarning("Bad timestamp", "Start/End must be seconds or MM:SS / HH:MM:SS.")
             return
 
-        clips_dir = self.settings.background_clips_dir
-        clips_dir.mkdir(parents=True, exist_ok=True)
-        out_path = clips_dir / f"clip_{int(time.time())}.mp4"
-
         self.log(f"Starting youtube job: {url} (mode={mode})")
         self.run_in_thread(
             lambda: youtube_pipeline.run(
-                url, mode=mode, start=start, end=end, out_path=out_path,
+                url, mode=mode, start=start, end=end,
+                out_dir=self.settings.background_clips_dir,
+                progress_cb=self.report_progress,
+            )
+        )
+
+    def _load_giga_info(self):
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            return
+        self.load_info_button.configure(state="disabled")
+        self.giga_status_var.set("Loading...")
+        self.log(f"Fetching info for {url}")
+
+        def worker():
+            try:
+                info = youtube_pipeline.fetch_info(url)
+            except Exception as exc:
+                self.after(0, lambda: self._on_giga_info_error(exc))
+            else:
+                self.after(0, lambda: self._on_giga_info_loaded(info))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_giga_info_loaded(self, info):
+        self.load_info_button.configure(state="normal")
+        self._giga_duration = info["duration"]
+        self._giga_title = info["title"]
+        self.giga_status_var.set(
+            f"{info['title']} ({video_utils.format_timestamp(info['duration'])})"
+        )
+        self.range_slider.set_duration(info["duration"])
+        self.log(f"Loaded info: {info['title']} ({info['duration']:.1f}s)")
+
+    def _on_giga_info_error(self, exc):
+        self.load_info_button.configure(state="normal")
+        self.giga_status_var.set("No video loaded")
+        self.log(f"Error loading info: {exc}")
+        messagebox.showerror("Error", str(exc))
+
+    def _run_giga_sample(self):
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            return
+        if self._giga_duration <= 0:
+            messagebox.showwarning("Load info first", "Click Load Info before Giga Sample.")
+            return
+
+        count = self.giga_count_var.get()
+        start, end = self.range_slider.get_range()
+
+        self.log(
+            f"Starting giga-sample job: {url} (count={count}, range={start:.1f}-{end:.1f})"
+        )
+        self.run_in_thread(
+            lambda: youtube_pipeline.run_giga_sample(
+                url, count=count, start=start, end=end,
+                out_dir=self.settings.background_clips_dir,
                 progress_cb=self.report_progress,
             )
         )

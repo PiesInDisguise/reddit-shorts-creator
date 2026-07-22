@@ -1,6 +1,5 @@
 import argparse
 import sys
-import time
 from pathlib import Path
 
 from config import ConfigError, Settings
@@ -71,14 +70,11 @@ def cmd_youtube(args, settings: Settings) -> int:
     start = video_utils.parse_timestamp(args.start) if args.start else None
     end = video_utils.parse_timestamp(args.end) if args.end else None
 
-    if args.out:
-        out_path = Path(args.out)
-    else:
-        # youtube mode exists to prepare background filler footage, so that's
-        # where clips land by default; pass --out to save somewhere else.
-        clips_dir = settings.background_clips_dir
-        clips_dir.mkdir(parents=True, exist_ok=True)
-        out_path = clips_dir / f"clip_{int(time.time())}.mp4"
+    # youtube mode exists to prepare background filler footage, so that's
+    # where clips land by default (with a descriptive filename); pass --out
+    # to save somewhere else with an exact name instead.
+    out_path = Path(args.out) if args.out else None
+    out_dir = None if args.out else settings.background_clips_dir
 
     out = youtube_pipeline.run(
         args.url,
@@ -86,9 +82,29 @@ def cmd_youtube(args, settings: Settings) -> int:
         start=start,
         end=end,
         out_path=out_path,
+        out_dir=out_dir,
         keep_work=args.keep_work,
     )
     print(f"Wrote {out}")
+    return 0
+
+
+def cmd_giga_sample(args, settings: Settings) -> int:
+    start = video_utils.parse_timestamp(args.start) if args.start else None
+    end = video_utils.parse_timestamp(args.end) if args.end else None
+    out_dir = Path(args.out_dir) if args.out_dir else settings.background_clips_dir
+
+    outs = youtube_pipeline.run_giga_sample(
+        args.url,
+        count=args.count,
+        start=start,
+        end=end,
+        clip_length=args.clip_length,
+        out_dir=out_dir,
+        keep_work=args.keep_work,
+    )
+    for out in outs:
+        print(f"Wrote {out}")
     return 0
 
 
@@ -158,6 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_youtube.add_argument("--out")
     p_youtube.add_argument("--keep-work", action="store_true")
 
+    p_giga = sub.add_parser(
+        "giga-sample",
+        help="Cut N spread-out background clips from one YouTube video into background_clips/",
+    )
+    p_giga.add_argument("url")
+    p_giga.add_argument("--count", type=int, required=True)
+    p_giga.add_argument("--start")
+    p_giga.add_argument("--end")
+    p_giga.add_argument("--clip-length", type=float, default=180.0)
+    p_giga.add_argument("--out-dir")
+    p_giga.add_argument("--keep-work", action="store_true")
+
     p_reddit = sub.add_parser("reddit", help="Turn a Reddit thread into a narrated short")
     p_reddit.add_argument("url")
     p_reddit.add_argument("--voice-id", help="ElevenLabs voice ID (defaults to the first saved voice)")
@@ -185,6 +213,7 @@ def main() -> int:
         "gui": cmd_gui,
         "doctor": cmd_doctor,
         "youtube": cmd_youtube,
+        "giga-sample": cmd_giga_sample,
         "reddit": cmd_reddit,
         "upload": cmd_upload,
     }

@@ -1,6 +1,7 @@
 import random
+import re
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
@@ -49,6 +50,27 @@ def parse_timestamp(value: str) -> float:
     for part in parts:
         seconds = seconds * 60 + part
     return seconds
+
+
+def format_timestamp(seconds: float) -> str:
+    """Reverse of parse_timestamp: seconds -> "MM:SS", or "H:MM:SS" past 1 hour."""
+    total = int(round(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def sanitize_filename(name: str, max_length: int = 80) -> str:
+    """Windows-safe filename stem: strip reserved chars, collapse whitespace to
+    hyphens, cap length. Preserves the original casing."""
+    cleaned = re.sub(r'[<>:"/\\|?*]', "", name)
+    cleaned = re.sub(r"\s+", "-", cleaned.strip())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-.")
+    if not cleaned:
+        cleaned = "video"
+    return cleaned[:max_length].rstrip("-")
 
 
 class IntervalError(ValueError):
@@ -108,3 +130,35 @@ def pick_background_offset(clip_duration: float, needed_duration: float) -> Opti
         return None
     max_start = clip_duration - needed_duration
     return random.uniform(0, max_start)
+
+
+def compute_giga_sample_intervals(
+    start: float, end: float, count: int, clip_length: float
+) -> List[Tuple[float, float]]:
+    """Split [start, end) into `count` equal buckets and return one (clip_start,
+    clip_end) per bucket. If a bucket is big enough, the clip is placed at a
+    random offset inside it (non-overlapping, spread across the range). If
+    not, the clip is anchored at the bucket's start (overlap allowed), clamped
+    so it never runs past `end` -- either way, clips still spread evenly
+    across the whole range."""
+    if count < 1:
+        raise ValueError("count must be >= 1")
+    duration = end - start
+    if duration <= 0:
+        raise ValueError(f"end ({end}) must be greater than start ({start})")
+    if clip_length > duration:
+        raise ValueError(
+            f"clip_length ({clip_length}) cannot exceed the sampled range ({duration})"
+        )
+
+    bucket_size = duration / count
+    intervals = []
+    for i in range(count):
+        bucket_start = start + i * bucket_size
+        if bucket_size >= clip_length:
+            clip_start = bucket_start + random.uniform(0, bucket_size - clip_length)
+        else:
+            clip_start = bucket_start
+        clip_start = max(start, min(clip_start, end - clip_length))
+        intervals.append((clip_start, clip_start + clip_length))
+    return intervals

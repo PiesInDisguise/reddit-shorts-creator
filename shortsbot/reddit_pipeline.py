@@ -210,6 +210,8 @@ def run(
             "-c:a",
             "aac",
             "-shortest",
+            "-metadata",
+            f"title={post.title}",
             str(out_path),
         ]
     )

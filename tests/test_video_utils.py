@@ -60,5 +60,71 @@ class TestParseTimestamp(unittest.TestCase):
         self.assertEqual(video_utils.parse_timestamp("1:01:30"), 3690.0)
 
 
+class TestFormatTimestamp(unittest.TestCase):
+    def test_zero(self):
+        self.assertEqual(video_utils.format_timestamp(0), "00:00")
+
+    def test_minutes_seconds(self):
+        self.assertEqual(video_utils.format_timestamp(90), "01:30")
+
+    def test_hours(self):
+        self.assertEqual(video_utils.format_timestamp(3661), "1:01:01")
+
+    def test_round_trips_with_parse_timestamp(self):
+        formatted = video_utils.format_timestamp(125)
+        self.assertEqual(video_utils.parse_timestamp(formatted), 125.0)
+
+
+class TestSanitizeFilename(unittest.TestCase):
+    def test_strips_reserved_chars_and_hyphenates_spaces(self):
+        self.assertEqual(
+            video_utils.sanitize_filename('My Video: "Best" Ever?'), "My-Video-Best-Ever"
+        )
+
+    def test_removes_chars_with_no_surrounding_space(self):
+        self.assertEqual(
+            video_utils.sanitize_filename("Weird/Name\\With*Chars<>|"), "WeirdNameWithChars"
+        )
+
+    def test_blank_input_falls_back(self):
+        self.assertEqual(video_utils.sanitize_filename("   "), "video")
+
+    def test_truncates_to_max_length(self):
+        result = video_utils.sanitize_filename("x" * 200, max_length=80)
+        self.assertLessEqual(len(result), 80)
+
+
+class TestComputeGigaSampleIntervals(unittest.TestCase):
+    def test_enough_room_no_overlap_spread_across_range(self):
+        intervals = video_utils.compute_giga_sample_intervals(0, 600, count=5, clip_length=60)
+        self.assertEqual(len(intervals), 5)
+        for i, (s, e) in enumerate(intervals):
+            self.assertAlmostEqual(e - s, 60)
+            self.assertGreaterEqual(s, i * 120)
+            self.assertLessEqual(e, (i + 1) * 120 + 1e-6)
+        for (_, e1), (s2, _) in zip(intervals, intervals[1:]):
+            self.assertLessEqual(e1, s2 + 1e-6)  # non-overlapping
+
+    def test_not_enough_room_allows_overlap_but_still_spreads(self):
+        intervals = video_utils.compute_giga_sample_intervals(0, 60, count=5, clip_length=30)
+        self.assertEqual(len(intervals), 5)
+        starts = [s for s, _ in intervals]
+        self.assertEqual(starts, sorted(starts))  # spread monotonically
+        self.assertTrue(
+            any(e1 > s2 for (_, e1), (s2, _) in zip(intervals, intervals[1:]))
+        )  # overlap happens
+        for s, e in intervals:
+            self.assertGreaterEqual(s, 0)
+            self.assertLessEqual(e, 60)
+
+    def test_rejects_clip_length_longer_than_range(self):
+        with self.assertRaises(ValueError):
+            video_utils.compute_giga_sample_intervals(0, 60, count=1, clip_length=90)
+
+    def test_rejects_zero_count(self):
+        with self.assertRaises(ValueError):
+            video_utils.compute_giga_sample_intervals(0, 60, count=0, clip_length=10)
+
+
 if __name__ == "__main__":
     unittest.main()
