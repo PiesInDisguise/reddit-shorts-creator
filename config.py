@@ -19,6 +19,13 @@ class Settings:
     enable_upload: bool
     youtube_client_secrets_file: Path
     youtube_token_file: Path
+    tiktok_client_key: str
+    tiktok_client_secret: str
+    tiktok_token_file: Path
+    tiktok_redirect_uri: str
+    ig_access_token: str
+    ig_business_account_id: str
+    ngrok_auth_token: str
 
     @classmethod
     def load(cls) -> "Settings":
@@ -41,6 +48,17 @@ class Settings:
             youtube_token_file=Path(
                 os.environ.get("YOUTUBE_TOKEN_FILE", "./.secrets/youtube_token.json")
             ),
+            tiktok_client_key=os.environ.get("TIKTOK_CLIENT_KEY", ""),
+            tiktok_client_secret=os.environ.get("TIKTOK_CLIENT_SECRET", ""),
+            tiktok_token_file=Path(
+                os.environ.get("TIKTOK_TOKEN_FILE", "./.secrets/tiktok_token.json")
+            ),
+            tiktok_redirect_uri=os.environ.get(
+                "TIKTOK_REDIRECT_URI", "http://localhost:8081/callback"
+            ),
+            ig_access_token=os.environ.get("IG_ACCESS_TOKEN", ""),
+            ig_business_account_id=os.environ.get("IG_BUSINESS_ACCOUNT_ID", ""),
+            ngrok_auth_token=os.environ.get("NGROK_AUTH_TOKEN", ""),
         )
 
     def require_apify(self) -> None:

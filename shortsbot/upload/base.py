@@ -30,4 +30,8 @@ class Uploader(ABC):
 
 
 class NotConfiguredError(RuntimeError):
-    pass
+    """Credentials/config for this platform haven't been set up yet."""
+
+
+class UploadError(RuntimeError):
+    """Credentials were present but the upload itself failed (API error)."""

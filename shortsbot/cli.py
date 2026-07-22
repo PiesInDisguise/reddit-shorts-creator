@@ -100,8 +100,12 @@ def cmd_reddit(args, settings: Settings) -> int:
 
 UPLOADERS = {
     "youtube": lambda s: YouTubeUploader(s.youtube_client_secrets_file, s.youtube_token_file),
-    "tiktok": lambda s: TikTokUploader(),
-    "instagram": lambda s: InstagramUploader(),
+    "tiktok": lambda s: TikTokUploader(
+        s.tiktok_client_key, s.tiktok_client_secret, s.tiktok_token_file, s.tiktok_redirect_uri
+    ),
+    "instagram": lambda s: InstagramUploader(
+        s.ig_access_token, s.ig_business_account_id, s.ngrok_auth_token
+    ),
 }
 
 

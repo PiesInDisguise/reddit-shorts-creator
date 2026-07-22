@@ -66,13 +66,24 @@ python main.py upload <video_path> --platform youtube --title "..." [--descripti
    `.secrets/youtube_client_secret.json` (path configurable via `YOUTUBE_CLIENT_SECRETS_FILE`).
    First run opens a browser for one-time consent; the refresh token is cached at
    `.secrets/youtube_token.json`.
-4. **TikTok / Instagram**: not implemented yet — `--platform tiktok|instagram` will raise a clear
-   "pending API access" error. TikTok requires an app-review-approved Content Posting API app;
-   Instagram's Graph API requires a public URL for the video file plus a Business/Creator account
-   linked to a Facebook Page. Revisit once you've sorted access/hosting for either.
+4. **TikTok**: create an app at <https://developers.tiktok.com> with Content Posting API access,
+   set `TIKTOK_CLIENT_KEY`/`TIKTOK_CLIENT_SECRET` in `.env` (register `TIKTOK_REDIRECT_URI`,
+   default `http://localhost:8081/callback`, as the app's redirect URI). First run opens a browser
+   for one-time consent; the token is cached at `.secrets/tiktok_token.json` and auto-refreshed
+   after that. Note: unaudited apps are restricted by TikTok to `SELF_ONLY` privacy and/or posting
+   to the creator's draft inbox rather than direct publish — that's a TikTok-side review
+   requirement, not something this code controls.
+5. **Instagram**: needs a Business/Creator IG account linked to a Facebook Page, and a long-lived
+   access token with the `instagram_content_publish` permission (Meta App Review required beyond
+   your own linked test account) — set `IG_ACCESS_TOKEN`/`IG_BUSINESS_ACCOUNT_ID` in `.env`.
+   Instagram's Graph API needs a public URL for the video rather than a direct upload, so this
+   spins up a temporary local server tunneled through [ngrok](https://ngrok.com) (`pip install`s
+   `pyngrok` from `requirements-upload.txt`); set `NGROK_AUTH_TOKEN` (free account) for a
+   stable tunnel. Instagram has no per-post privacy field — published Reels follow the account's
+   own privacy setting regardless of `--privacy`.
 
-Always try `--dry-run` first to check the request payload without spending API quota, and upload
-as `private`/`unlisted` before ever using `public`.
+Always try `--dry-run` first to check the request payload without spending API quota/credentials,
+and upload as `private`/`unlisted` before ever using `public`.
 
 ## Testing
 
