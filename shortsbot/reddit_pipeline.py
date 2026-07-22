@@ -5,10 +5,8 @@ from typing import Callable, Optional
 
 from . import captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils
 
-BUDGET_SECONDS = 88.0  # ~1:30 target, minus a small safety margin for encoder rounding
+BUDGET_SECONDS = 118.0  # ~2:00 target, minus a small safety margin for encoder rounding
 WORDS_PER_SECOND_ESTIMATE = 2.5  # ~150 wpm, a natural conversational narration pace
-MAX_TOTAL_SPEED = 1.35  # ceiling on narration speed-up -- past this it sounds
-# rushed/hard to follow even with word-flash captions helping comprehension
 
 ProgressCB = Callable[[str, float], None]
 
@@ -17,23 +15,10 @@ def _noop_progress(stage: str, fraction: float) -> None:
     pass
 
 
-def _truncate_to_sentence(text: str, max_words: int) -> str:
-    """Cut text down to at most max_words, backing up to the last full
-    sentence that fits rather than cutting mid-sentence."""
-    words = text.split()
-    if len(words) <= max_words:
-        return text
-    truncated_words = words[:max_words]
-    for i in range(len(truncated_words) - 1, -1, -1):
-        if truncated_words[i].rstrip().endswith((".", "!", "?")):
-            return " ".join(truncated_words[: i + 1])
-    return " ".join(truncated_words)  # no sentence boundary in range -- hard cut
-
-
 def _prepare_body_for_budget(body_text: str, remaining_budget: float) -> tuple:
-    """Decide the narration speed for body_text, capped at MAX_TOTAL_SPEED. If
-    it still wouldn't fit remaining_budget even at that speed, truncate the
-    body (at a sentence boundary) instead of speaking faster than the cap.
+    """Decide the narration speed for body_text. No cap: if it wouldn't fit
+    remaining_budget at normal pace, speed up by whatever factor is needed to
+    fit the whole thing -- the full story always gets told, never truncated.
     Returns (speed, text_to_narrate)."""
     word_count = max(1, len(body_text.split()))
     estimated_duration = word_count / WORDS_PER_SECOND_ESTIMATE
@@ -41,12 +26,20 @@ def _prepare_body_for_budget(body_text: str, remaining_budget: float) -> tuple:
     if remaining_budget <= 0 or estimated_duration <= remaining_budget:
         return 1.0, body_text
 
-    needed_factor = estimated_duration / remaining_budget
-    if needed_factor <= MAX_TOTAL_SPEED:
-        return needed_factor, body_text
+    return estimated_duration / remaining_budget, body_text
 
-    max_words = int(remaining_budget * MAX_TOTAL_SPEED * WORDS_PER_SECOND_ESTIMATE)
-    return MAX_TOTAL_SPEED, _truncate_to_sentence(body_text, max_words)
+
+def _atempo_chain(factor: float) -> str:
+    """Build an ffmpeg atempo filter chain for an arbitrary speed factor --
+    a single atempo only supports [0.5, 2.0], so factors beyond that are
+    split across multiple chained atempo stages."""
+    stages = []
+    remaining = factor
+    while remaining > 2.0:
+        stages.append(2.0)
+        remaining /= 2.0
+    stages.append(remaining)
+    return ",".join(f"atempo={s:.6f}" for s in stages)
 
 
 def _concat_audio(paths: list, out_path: Path) -> None:
@@ -117,21 +110,18 @@ def run(
 
     total_duration = title_duration + body_duration
 
-    # --- Remainder speed-up if the estimate undershot (capped at MAX_TOTAL_SPEED
-    # combined with api_speed -- if that's not enough, the video runs slightly
-    # over budget rather than sounding faster than the cap) ---
+    # --- Remainder speed-up if the estimate undershot (no cap -- the full
+    # story is always narrated within budget, however fast that requires) ---
     if total_duration > BUDGET_SECONDS and has_body:
         progress_cb("Adjusting narration speed to fit the time budget", 0.45)
-        ideal_remainder = total_duration / BUDGET_SECONDS
-        max_allowed_remainder = MAX_TOTAL_SPEED / api_speed
-        remainder_factor = min(ideal_remainder, max_allowed_remainder)
+        remainder_factor = total_duration / BUDGET_SECONDS
         sped_body_path = work_dir / "body_sped.mp3"
         ffmpeg_utils.run_ffmpeg(
             [
                 "-i",
                 str(body_path),
                 "-filter:a",
-                f"atempo={remainder_factor:.6f}",
+                _atempo_chain(remainder_factor),
                 str(sped_body_path),
             ]
         )
