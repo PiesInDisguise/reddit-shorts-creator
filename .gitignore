@@ -5,6 +5,7 @@ __pycache__/
 work/
 output/
 cache/
+assets/sfx/
 background_clips/*
 !background_clips/.gitkeep
 .venv/

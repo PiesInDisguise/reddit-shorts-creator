@@ -3,11 +3,17 @@ from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from . import ffmpeg_utils
+
 CARD_WIDTH = 950
 PAD = 44
 ICON_SIZE = 96
 CORNER_RADIUS = 36
 SUPERSAMPLE = 3
+
+POP_DURATION = 0.5
+POP_MIN_SCALE = 0.2
+POP_FPS = 30
 
 BADGE_FONT_SIZE = 30
 AUTHOR_FONT_SIZE = 28
@@ -211,3 +217,91 @@ def save_header_card_png(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path)
     return out_path
+
+
+def build_header_overlay(
+    header_canvas: Image.Image,
+    title_duration: float,
+    total_duration: float,
+    work_dir: Path,
+) -> Path:
+    """Build a full-timeline alpha video: the header card pops in (20% -> 100%
+    size, growing from its own center since it's already centered on the
+    canvas) over POP_DURATION seconds, holds static for the rest of the title
+    window, then goes fully transparent for the remainder of the clip (while
+    the body is read). Same concat-demuxer + qtrle technique as the caption
+    overlay, so the final composite just needs a plain overlay for this too."""
+    frames_dir = work_dir / "header_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    frame_w, frame_h = header_canvas.size
+    pop_duration = min(POP_DURATION, title_duration) if title_duration > 0 else 0.0
+    frame_count = max(1, round(pop_duration * POP_FPS)) if pop_duration > 0 else 0
+
+    list_lines: list = []
+
+    def add_entry(path: Path, duration: float):
+        list_lines.append(f"file '{path.resolve().as_posix()}'")
+        list_lines.append(f"duration {max(duration, 1 / POP_FPS):.6f}")
+
+    for i in range(frame_count):
+        t = i / POP_FPS
+        progress = min(1.0, t / pop_duration) if pop_duration > 0 else 1.0
+        scale = POP_MIN_SCALE + (1.0 - POP_MIN_SCALE) * progress
+        scaled_w = max(1, int(frame_w * scale))
+        scaled_h = max(1, int(frame_h * scale))
+        scaled = header_canvas.resize((scaled_w, scaled_h), Image.LANCZOS)
+        frame = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
+        frame.alpha_composite(scaled, ((frame_w - scaled_w) // 2, (frame_h - scaled_h) // 2))
+        frame_path = frames_dir / f"pop_{i:03d}.png"
+        frame.save(frame_path)
+        add_entry(frame_path, 1 / POP_FPS)
+
+    # Hold at full size for whatever's left of the title window.
+    hold_duration = max(0.0, title_duration - pop_duration)
+    if hold_duration > 0:
+        full_path = frames_dir / "full.png"
+        header_canvas.save(full_path)
+        add_entry(full_path, hold_duration)
+
+    # Transparent for the rest of the clip (body-reading period).
+    blank_duration = max(0.0, total_duration - title_duration)
+    if blank_duration > 0:
+        blank_path = frames_dir / "blank.png"
+        Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0)).save(blank_path)
+        add_entry(blank_path, blank_duration)
+
+    if not list_lines:
+        # Degenerate case (title_duration <= 0 and total_duration <= 0): still
+        # need a valid, non-empty concat list.
+        blank_path = frames_dir / "blank.png"
+        Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0)).save(blank_path)
+        add_entry(blank_path, 1 / POP_FPS)
+
+    # concat demuxer quirk: the last entry's duration is ignored, so repeat the
+    # final file once more without a duration line.
+    last_file_line = list_lines[-2]
+    list_lines.append(last_file_line)
+
+    list_path = frames_dir / "list.txt"
+    list_path.write_text("\n".join(list_lines), encoding="utf-8")
+
+    overlay_path = work_dir / "header_overlay.mov"
+    ffmpeg_utils.run_ffmpeg(
+        [
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_path),
+            "-vsync",
+            "vfr",
+            "-pix_fmt",
+            "rgba",
+            "-c:v",
+            "qtrle",
+            str(overlay_path),
+        ]
+    )
+    return overlay_path

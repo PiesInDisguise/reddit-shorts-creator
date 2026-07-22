@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import captions, ffmpeg_utils, header_card, reddit_client, tts_client, video_utils
+from . import captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils
 
 BUDGET_SECONDS = 88.0  # ~1:30 target, minus a small safety margin for encoder rounding
 WORDS_PER_SECOND_ESTIMATE = 2.5  # ~150 wpm, a natural conversational narration pace
@@ -167,12 +167,17 @@ def run(
         chunks, title_duration, work_dir, settings.impact_font_path
     )
 
-    # --- Header card ---
+    # --- Header card (pop-in animation + hold + fade to transparent) ---
     progress_cb("Rendering header card", 0.78)
-    header_path = work_dir / "header.png"
-    header_card.save_header_card_png(
-        post.subreddit, post.author, post.title, post.icon_path, settings.impact_font_path, header_path
+    header_canvas = header_card.render_header_card(
+        post.subreddit, post.author, post.title, post.icon_path, settings.impact_font_path
     )
+    header_overlay_path = header_card.build_header_overlay(
+        header_canvas, title_duration, total_duration, work_dir
+    )
+
+    # --- Whoosh sound effect, timed to the header's pop-in ---
+    whoosh_path = sfx.ensure_whoosh_sound()
 
     # --- Background footage ---
     progress_cb("Preparing background footage", 0.82)
@@ -192,24 +197,30 @@ def run(
         out_path = Path("output") / f"reddit_{post.post_id}_{int(time.time())}.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Both overlays now span the full clip timeline with built-in transparency
+    # for their "off" periods, so compositing them is just two plain overlays.
     filter_complex = (
         f"[0:v]{crop_filter}[bg];"
-        f"[bg][1:v]overlay=0:0:enable='between(t,0,{title_duration:.3f})'[bgh];"
-        f"[bgh][2:v]overlay=0:0[vout]"
+        f"[bg][1:v]overlay=0:0[bgh];"
+        f"[bgh][2:v]overlay=0:0[vout];"
+        f"[4:a]volume=0.55[woosh];"
+        f"[3:a][woosh]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        f"alimiter=limit=0.95[aout]"
     )
 
     args = (
         bg_input_args
-        + ["-loop", "1", "-framerate", "30", "-i", str(header_path)]
+        + ["-i", str(header_overlay_path)]
         + ["-i", str(caption_overlay_path)]
         + ["-i", str(narration_path)]
+        + ["-i", str(whoosh_path)]
         + [
             "-filter_complex",
             filter_complex,
             "-map",
             "[vout]",
             "-map",
-            "3:a",
+            "[aout]",
             "-t",
             f"{total_duration:.3f}",
             "-c:v",
