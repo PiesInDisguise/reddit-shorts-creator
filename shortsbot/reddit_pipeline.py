@@ -6,27 +6,12 @@ from typing import Callable, Optional
 from . import bgmusic, captions, ffmpeg_utils, header_card, reddit_client, sfx, tts_client, video_utils
 
 BUDGET_SECONDS = 118.0  # ~2:00 target, minus a small safety margin for encoder rounding
-WORDS_PER_SECOND_ESTIMATE = 2.5  # ~150 wpm, a natural conversational narration pace
 
 ProgressCB = Callable[[str, float], None]
 
 
 def _noop_progress(stage: str, fraction: float) -> None:
     pass
-
-
-def _prepare_body_for_budget(body_text: str, remaining_budget: float) -> tuple:
-    """Decide the narration speed for body_text. No cap: if it wouldn't fit
-    remaining_budget at normal pace, speed up by whatever factor is needed to
-    fit the whole thing -- the full story always gets told, never truncated.
-    Returns (speed, text_to_narrate)."""
-    word_count = max(1, len(body_text.split()))
-    estimated_duration = word_count / WORDS_PER_SECOND_ESTIMATE
-
-    if remaining_budget <= 0 or estimated_duration <= remaining_budget:
-        return 1.0, body_text
-
-    return estimated_duration / remaining_budget, body_text
 
 
 def _atempo_chain(factor: float) -> str:
@@ -55,7 +40,6 @@ def _concat_audio(paths: list, out_path: Path) -> None:
 def run(
     url: str,
     settings,
-    voice_id: Optional[str] = None,
     out_path: Optional[Path] = None,
     keep_work: bool = False,
     progress_cb: Optional[ProgressCB] = None,
@@ -65,10 +49,8 @@ def run(
     if not ffmpeg_utils.ffmpeg_available():
         raise RuntimeError("ffmpeg/ffprobe not found on PATH. Run `python main.py doctor`.")
 
-    settings.require_elevenlabs()
     settings.require_apify()
 
-    voice_id = voice_id or settings.elevenlabs_default_voice_id
     icon_cache_dir = Path("cache") / "subreddit_icons"
 
     progress_cb("Fetching Reddit post", 0.0)
@@ -81,28 +63,19 @@ def run(
     # --- Title narration (always normal pace) ---
     progress_cb("Synthesizing title narration", 0.05)
     title_path = work_dir / "title.mp3"
-    title_alignment = tts_client.synthesize(
-        post.title, voice_id, settings.elevenlabs_api_key, title_path, speed=1.0
-    )
+    title_alignment = tts_client.synthesize(post.title, title_path)
     title_duration = ffmpeg_utils.probe_audio_duration(title_path)
 
-    # --- Body narration ---
+    # --- Body narration (always generated at natural pace -- Chatterbox has
+    # no speed control, so any needed speed-up happens below via atempo,
+    # based on the actually-measured duration rather than a pre-estimate) ---
     body_text = post.body.strip()
     has_body = bool(body_text)
-
-    remaining_budget = BUDGET_SECONDS - title_duration
-    if has_body:
-        target_speed, body_text = _prepare_body_for_budget(body_text, remaining_budget)
-    else:
-        target_speed = 1.0
-    api_speed = min(target_speed, tts_client.MAX_API_SPEED)
 
     progress_cb("Synthesizing body narration", 0.15)
     body_path = work_dir / "body.mp3"
     if has_body:
-        body_alignment = tts_client.synthesize(
-            body_text, voice_id, settings.elevenlabs_api_key, body_path, speed=api_speed
-        )
+        body_alignment = tts_client.synthesize(body_text, body_path)
         body_duration = ffmpeg_utils.probe_audio_duration(body_path)
     else:
         body_alignment = tts_client.Alignment(characters=[], start_times=[], end_times=[])
@@ -110,8 +83,8 @@ def run(
 
     total_duration = title_duration + body_duration
 
-    # --- Remainder speed-up if the estimate undershot (no cap -- the full
-    # story is always narrated within budget, however fast that requires) ---
+    # --- Speed up to fit the budget if needed (no cap -- the full story is
+    # always narrated within budget, however fast that requires) ---
     if total_duration > BUDGET_SECONDS and has_body:
         progress_cb("Adjusting narration speed to fit the time budget", 0.45)
         remainder_factor = total_duration / BUDGET_SECONDS

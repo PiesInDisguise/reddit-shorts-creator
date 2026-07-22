@@ -1,13 +1,11 @@
-import base64
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
-import requests
+import modal
 
-ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
-MIN_API_SPEED = 0.7
-MAX_API_SPEED = 1.2
+MODAL_APP_NAME = "shortsbot-tts"
+MODAL_CLASS_NAME = "TTSModel"
 
 
 class TTSError(RuntimeError):
@@ -21,46 +19,53 @@ class Alignment:
     end_times: List[float]
 
 
-@dataclass
-class NarrationResult:
-    audio_path: Path
-    alignment: Alignment
-    duration: float  # actual decoded audio duration (source of truth), set by caller
+def _alignment_from_words(words: list) -> Alignment:
+    """Expand word-level (text, start, end) entries into the character-level
+    Alignment shape captions.words_from_alignment() expects -- every character
+    in a word shares that word's start/end, with a single space token between
+    words (its own timing is irrelevant since spaces are just split points)."""
+    characters: List[str] = []
+    start_times: List[float] = []
+    end_times: List[float] = []
+
+    for i, word in enumerate(words):
+        text = word["word"]
+        start = float(word["start"])
+        end = float(word["end"])
+        for ch in text:
+            characters.append(ch)
+            start_times.append(start)
+            end_times.append(end)
+        if i < len(words) - 1:
+            characters.append(" ")
+            start_times.append(end)
+            end_times.append(end)
+
+    return Alignment(characters=characters, start_times=start_times, end_times=end_times)
 
 
-def synthesize(
-    text: str,
-    voice_id: str,
-    api_key: str,
-    out_path: Path,
-    speed: float = 1.0,
-    model_id: str = "eleven_multilingual_v2",
-) -> Alignment:
+def synthesize(text: str, out_path: Path) -> Alignment:
+    """Generate narration for text via the Chatterbox TTS Modal app (see
+    modal_tts_app.py, deployed separately with `modal deploy modal_tts_app.py`)
+    and return word-level timing (from its built-in Whisper forced alignment)
+    expanded into the character-level Alignment shape."""
     if not text.strip():
         raise TTSError("Cannot synthesize empty text")
 
-    speed = max(MIN_API_SPEED, min(MAX_API_SPEED, speed))
+    try:
+        model_cls = modal.Cls.from_name(MODAL_APP_NAME, MODAL_CLASS_NAME)
+    except Exception as exc:
+        raise TTSError(
+            f"Could not find the '{MODAL_APP_NAME}' Modal app. Deploy it first with "
+            f"`modal deploy modal_tts_app.py`. ({exc})"
+        ) from exc
 
-    url = f"{ELEVENLABS_BASE_URL}/text-to-speech/{voice_id}/with-timestamps"
-    headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
-    payload = {
-        "text": text,
-        "model_id": model_id,
-        "voice_settings": {"speed": speed},
-    }
+    try:
+        result = model_cls().generate.remote(text)
+    except Exception as exc:
+        raise TTSError(f"Chatterbox TTS generation failed on Modal: {exc}") from exc
 
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    if resp.status_code != 200:
-        raise TTSError(f"ElevenLabs TTS request failed ({resp.status_code}): {resp.text}")
-
-    data = resp.json()
-    audio_bytes = base64.b64decode(data["audio_base64"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(audio_bytes)
+    out_path.write_bytes(result["audio"])
 
-    alignment_data = data["alignment"]
-    return Alignment(
-        characters=alignment_data["characters"],
-        start_times=alignment_data["character_start_times_seconds"],
-        end_times=alignment_data["character_end_times_seconds"],
-    )
+    return _alignment_from_words(result["words"])

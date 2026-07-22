@@ -13,8 +13,6 @@ class ConfigError(RuntimeError):
 
 @dataclass
 class Settings:
-    elevenlabs_api_key: str
-    elevenlabs_default_voice_id: str
     apify_api_token: str
     background_clips_dir: Path
     impact_font_path: Path
@@ -25,10 +23,6 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         return cls(
-            elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY", ""),
-            elevenlabs_default_voice_id=os.environ.get(
-                "ELEVENLABS_DEFAULT_VOICE_ID", "TX3LPaxmHKxFdv7VOQHJ"
-            ),
             apify_api_token=os.environ.get("APIFY_API_TOKEN", ""),
             background_clips_dir=Path(
                 os.environ.get("BACKGROUND_CLIPS_DIR", "./background_clips")
@@ -48,13 +42,6 @@ class Settings:
                 os.environ.get("YOUTUBE_TOKEN_FILE", "./.secrets/youtube_token.json")
             ),
         )
-
-    def require_elevenlabs(self) -> None:
-        if not self.elevenlabs_api_key:
-            raise ConfigError(
-                "ELEVENLABS_API_KEY is not set. Add it to your .env file "
-                "(copy .env.example to .env and fill it in)."
-            )
 
     def require_apify(self) -> None:
         if not self.apify_api_token:

@@ -2,3 +2,5 @@ yt-dlp
 requests
 python-dotenv
 Pillow>=10.0
+modal
+numpy

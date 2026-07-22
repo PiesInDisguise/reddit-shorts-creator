@@ -191,24 +191,20 @@ class RedditTab(PipelineTab):
         self.url_var = tk.StringVar()
         ttk.Entry(self, textvariable=self.url_var).grid(row=0, column=1, sticky="ew", padx=6)
 
-        ttk.Label(self, text="Voice ID (optional):").grid(row=1, column=0, sticky="w")
-        self.voice_var = tk.StringVar()
-        ttk.Entry(self, textvariable=self.voice_var).grid(row=1, column=1, sticky="ew", padx=6)
-
         button_row = ttk.Frame(self)
-        button_row.grid(row=2, column=0, columnspan=2, pady=10, sticky="w")
+        button_row.grid(row=1, column=0, columnspan=2, pady=10, sticky="w")
         ttk.Button(button_row, text="Run", command=self._run).pack(side="left")
         ttk.Button(button_row, text="Open output folder", command=self.open_output_folder).pack(
             side="left", padx=(8, 0)
         )
 
         progress_frame = self.build_progress_widgets(self)
-        progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        progress_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 8))
 
-        ttk.Label(self, text="Log:").grid(row=4, column=0, sticky="w")
+        ttk.Label(self, text="Log:").grid(row=3, column=0, sticky="w")
         self.log_box = self.build_log_box(self)
-        self.log_box.grid(row=5, column=0, columnspan=2, sticky="nsew")
-        self.rowconfigure(5, weight=1)
+        self.log_box.grid(row=4, column=0, columnspan=2, sticky="nsew")
+        self.rowconfigure(4, weight=1)
 
     def _run(self):
         url = self.url_var.get().strip()
@@ -216,12 +212,9 @@ class RedditTab(PipelineTab):
             messagebox.showwarning("Missing URL", "Paste a Reddit thread URL first.")
             return
 
-        voice_id = self.voice_var.get().strip() or None
         self.log(f"Starting reddit job: {url}")
         self.run_in_thread(
-            lambda: reddit_pipeline.run(
-                url, self.settings, voice_id=voice_id, progress_cb=self.report_progress
-            )
+            lambda: reddit_pipeline.run(url, self.settings, progress_cb=self.report_progress)
         )
 
 
