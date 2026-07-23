@@ -1,4 +1,5 @@
 import random
+import re
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -12,6 +13,22 @@ TARGET_SECONDS = 90.0  # independent of reddit_pipeline.BUDGET_SECONDS -- delibe
 # separate: this is a quality gate for what the autonomous picker considers usable,
 # not a change to the pipeline's own (uncapped) speed-up behavior for manual/user-
 # supplied posts.
+
+# Auto-published content is public immediately with no human review, so posts
+# using a racial slur (in the title or body) are hard-blocked regardless of
+# how well they'd otherwise fit the time budget.
+_SLUR_PATTERN = re.compile(
+    r"\b("
+    r"nigger|niggers|nigga|niggas|niggah|niggahs|"
+    r"chink|chinks|spic|spics|kike|kikes|"
+    r"wetback|wetbacks|gook|gooks|coon|coons|beaner|beaners"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def contains_slur(post: RedditPost) -> bool:
+    return bool(_SLUR_PATTERN.search(post.title) or _SLUR_PATTERN.search(post.body))
 
 
 def estimate_too_long(post: RedditPost) -> bool:
@@ -38,9 +55,10 @@ def pick_post(
 ) -> Optional[RedditPost]:
     """Pick the next post to auto-generate: choose a time-window pool by weighted
     random draw (day 30% / week 40% / year 30%), then return the first candidate
-    in that pool that hasn't been used before and isn't too long to narrate
-    nicely. Falls back to the other pools (in weight order) if the chosen one
-    has nothing usable; returns None if all three pools are exhausted."""
+    in that pool that hasn't been used before, isn't too long to narrate nicely,
+    and doesn't contain a racial slur. Falls back to the other pools (in weight
+    order) if the chosen one has nothing usable; returns None if all three
+    pools are exhausted."""
     rng = rng or random.Random()
 
     for pool in _pool_order(rng):
@@ -49,6 +67,8 @@ def pick_post(
             if used_posts.is_used(candidate.post_id, used_posts_path):
                 continue
             if estimate_too_long(candidate):
+                continue
+            if contains_slur(candidate):
                 continue
             return candidate
 

@@ -257,6 +257,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # Post titles can contain characters (emoji, etc.) the Windows console's
+    # active codepage can't render; without this, printing one crashes the
+    # whole process (fatal for auto-loop, which needs to keep running for
+    # days unattended) instead of just showing "?" for that character.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
     parser = build_parser()
     args = parser.parse_args()
     settings = Settings.load()
